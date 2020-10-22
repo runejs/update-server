@@ -1,0 +1,46 @@
+{
+    "name": "@runejs/update-server",
+    "version": "1.0.0-beta.1",
+    "description": "RuneJS Game Update Server",
+    "main": "dist/main.js",
+    "scripts": {
+        "start": "nodemon --max-old-space-size=1024 dist/main.js",
+        "lint": "tslint --project tsconfig.json",
+        "build:watch": "tsc --project tsconfig.json && babel ./src --out-dir dist --extensions \".ts,.tsx,.js\" --source-maps --watch",
+        "build": "rimraf dist && tsc --project tsconfig.json && babel ./src --out-dir dist --extensions \".ts,.tsx,.js\" --source-maps"
+    },
+    "repository": {
+        "type": "git",
+        "url": "git+ssh://git@github.com/rune-js/update-server.git"
+    },
+    "bugs": {
+        "url": "https://github.com/rune-js/update-server/issues"
+    },
+    "homepage": "https://github.com/rune-js/update-server#readme",
+    "author": "TheBlackParade",
+    "license": "GPL-3.0",
+    "dependencies": {
+        "@runejs/byte-buffer": "1.0.8",
+        "@runejs/cache-parser": "0.6.3",
+        "crc-32": "^1.2.0",
+        "js-yaml": "^3.13.1",
+        "source-map-support": "^0.5.16",
+        "ts-node": "^8.4.1",
+        "tslib": "^1.10.0",
+        "typescript": "^3.7.2"
+    },
+    "devDependencies": {
+        "@babel/cli": "^7.10.1",
+        "@babel/core": "^7.10.2",
+        "@babel/node": "^7.12.1",
+        "@babel/plugin-proposal-class-properties": "^7.10.1",
+        "@babel/preset-env": "^7.10.2",
+        "@babel/preset-typescript": "^7.10.1",
+        "@types/js-yaml": "^3.12.1",
+        "@types/node": "^12.12.6",
+        "babel-plugin-module-resolver": "^4.0.0",
+        "nodemon": "^2.0.6",
+        "rimraf": "^3.0.2",
+        "tslint": "^6.1.0"
+    }
+}
