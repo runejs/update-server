@@ -20,8 +20,8 @@
     "author": "TheBlackParade",
     "license": "GPL-3.0",
     "dependencies": {
-        "@runejs/byte-buffer": "1.0.8",
         "@runejs/cache-parser": "0.6.3",
+        "@runejs/core": "^1.0.0-beta.0",
         "crc-32": "^1.2.0",
         "js-yaml": "^3.13.1",
         "source-map-support": "^0.5.16",

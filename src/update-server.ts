@@ -1,10 +1,13 @@
 import { Cache } from '@runejs/cache-parser';
-import { ByteBuffer } from '@runejs/byte-buffer';
 import { Socket } from 'net';
 import * as CRC32 from 'crc-32';
-import { parseServerConfig, ServerConfig } from './server-config';
-import { openServer, SocketConnectionHandler } from './socket-server';
-import { logger } from './logger';
+import { openServer, SocketConnectionHandler, parseServerConfig, ByteBuffer, logger } from '@runejs/core';
+
+interface ServerConfig {
+    updateServerHost: string;
+    updateServerPort: number;
+    cacheDir: string;
+}
 
 enum ConnectionStage {
     HANDSHAKE = 'handshake',
@@ -79,7 +82,7 @@ class UpdateServerConnection extends SocketConnectionHandler {
     }
 
     private generateFile(index: number, file: number): Buffer {
-        let cacheFile: ByteBuffer;
+        let cacheFile: ByteBuffer | any; // @todo remove any when cache parser is using @runejs/core
 
         if(index === 255 && file === 255) {
             cacheFile = new ByteBuffer(this.updateServer.crcTable.length);
@@ -126,7 +129,7 @@ class UpdateServer {
 
     public constructor(host?: string, port?: number, cacheDir?: string) {
         if(!host) {
-            this.serverConfig = parseServerConfig();
+            this.serverConfig = parseServerConfig<ServerConfig>();
         } else {
             this.serverConfig = {
                 updateServerHost: host,
