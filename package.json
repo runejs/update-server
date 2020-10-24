@@ -1,13 +1,14 @@
 {
     "name": "@runejs/update-server",
-    "version": "1.0.0-beta.1",
+    "version": "1.0.0-beta.0",
     "description": "RuneJS Game Update Server",
-    "main": "dist/main.js",
+    "main": "dist/index.js",
+    "types": "dist/index.d.ts",
     "scripts": {
         "start": "nodemon --max-old-space-size=1024 dist/main.js",
         "lint": "tslint --project tsconfig.json",
         "build:watch": "tsc --project tsconfig.json && babel ./src --out-dir dist --extensions \".ts,.tsx,.js\" --source-maps --watch",
-        "build": "rimraf dist && tsc --project tsconfig.json && babel ./src --out-dir dist --extensions \".ts,.tsx,.js\" --source-maps"
+        "build": "rimraf dist && tsc"
     },
     "repository": {
         "type": "git",
