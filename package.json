@@ -1,6 +1,6 @@
 {
     "name": "@runejs/update-server",
-    "version": "1.0.0-beta.0",
+    "version": "1.0.0",
     "description": "RuneJS Game Update Server",
     "main": "dist/index.js",
     "types": "dist/index.d.ts",
@@ -18,11 +18,11 @@
         "url": "https://github.com/rune-js/update-server/issues"
     },
     "homepage": "https://github.com/rune-js/update-server#readme",
-    "author": "TheBlackParade",
+    "author": "Tynarus",
     "license": "GPL-3.0",
     "dependencies": {
         "@runejs/cache-parser": "0.6.3",
-        "@runejs/core": "^1.0.0-beta.0",
+        "@runejs/core": "^1.0.1",
         "crc-32": "^1.2.0",
         "js-yaml": "^3.13.1",
         "source-map-support": "^0.5.16",
