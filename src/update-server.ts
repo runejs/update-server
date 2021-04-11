@@ -1,12 +1,16 @@
-import { Cache } from '@runejs/cache-parser';
+import { logger } from '@runejs/core';
+import { ByteBuffer } from '@runejs/core/buffer';
+import { openServer, SocketConnectionHandler, parseServerConfig } from '@runejs/core/net';
+import { Filestore, readDataChunk, readIndexedDataChunk } from '@runejs/filestore';
 import { Socket } from 'net';
 import * as CRC32 from 'crc-32';
-import { openServer, SocketConnectionHandler, parseServerConfig, ByteBuffer, logger } from '@runejs/core';
+
 
 interface ServerConfig {
     updateServerHost: string;
     updateServerPort: number;
     cacheDir: string;
+    configDir?: string;
 }
 
 enum ConnectionStage {
@@ -88,7 +92,7 @@ class UpdateServerConnection extends SocketConnectionHandler {
             cacheFile = new ByteBuffer(this.updateServer.crcTable.length);
             this.updateServer.crcTable.copy(cacheFile, 0, 0);
         } else {
-            cacheFile = this.updateServer.cache.getRawFile(index, file);
+            cacheFile = this.updateServer.filestore.getIndex(index)?.getFile(file)?.content;
         }
 
         if(!cacheFile || cacheFile.length === 0) {
@@ -124,7 +128,7 @@ class UpdateServerConnection extends SocketConnectionHandler {
 class UpdateServer {
 
     public readonly serverConfig: ServerConfig;
-    public readonly cache: Cache;
+    public readonly filestore: Filestore;
     public readonly crcTable: ByteBuffer;
 
     public constructor(host?: string, port?: number, cacheDir?: string) {
@@ -138,19 +142,22 @@ class UpdateServer {
             };
         }
 
-        this.cache = new Cache(this.serverConfig.cacheDir, false);
+        this.filestore = new Filestore(this.serverConfig.cacheDir, {
+            configDir: this.serverConfig.configDir || this.serverConfig.cacheDir,
+            xteas: {}
+        });
         this.crcTable = this.generateCrcTable();
     }
 
     private generateCrcTable(): ByteBuffer {
-        const index = this.cache.metaChannel;
+        const index = this.filestore.channels.metaChannel;
         const indexLength = index.length;
         const buffer = new ByteBuffer(4048);
-        buffer.put(0, 'BYTE');
-        buffer.put(indexLength, 'INT');
+        buffer.put(0, 'byte');
+        buffer.put(indexLength, 'int');
         for(let file = 0; file < (indexLength / 6); file++) {
-            const crcValue = CRC32.buf(this.cache.getRawFile(255, file));
-            buffer.put(crcValue, 'INT');
+            const crcValue = CRC32.buf(readIndexedDataChunk(file, 255, this.filestore.channels)?.dataFile);
+            buffer.put(crcValue, 'int');
         }
 
         return buffer;
