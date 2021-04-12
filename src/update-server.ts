@@ -1,7 +1,7 @@
 import { logger } from '@runejs/core';
 import { ByteBuffer } from '@runejs/core/buffer';
 import { openServer, SocketConnectionHandler, parseServerConfig } from '@runejs/core/net';
-import { Filestore, readDataChunk, readIndexedDataChunk } from '@runejs/filestore';
+import { Filestore, readIndexedDataChunk } from '@runejs/filestore';
 import { Socket } from 'net';
 import * as CRC32 from 'crc-32';
 
@@ -50,9 +50,9 @@ class UpdateServerConnection extends SocketConnectionHandler {
                 break;
             case ConnectionStage.ACTIVE:
                 while(buffer.readable >= 4) {
-                    const type = buffer.get('BYTE', 'UNSIGNED');
-                    const index = buffer.get('BYTE', 'UNSIGNED');
-                    const file = buffer.get('SHORT', 'UNSIGNED');
+                    const type = buffer.get('byte', 'u');
+                    const index = buffer.get('byte', 'u');
+                    const file = buffer.get('short', 'u');
 
                     switch(type) {
                         case 0: // queue
@@ -86,13 +86,17 @@ class UpdateServerConnection extends SocketConnectionHandler {
     }
 
     private generateFile(index: number, file: number): Buffer {
-        let cacheFile: ByteBuffer | any; // @todo remove any when cache parser is using @runejs/core
+        let cacheFile: ByteBuffer;
 
-        if(index === 255 && file === 255) {
-            cacheFile = new ByteBuffer(this.updateServer.crcTable.length);
-            this.updateServer.crcTable.copy(cacheFile, 0, 0);
-        } else {
-            cacheFile = this.updateServer.filestore.getIndex(index)?.getFile(file)?.content;
+        try {
+            if(index === 255 && file === 255) {
+                cacheFile = new ByteBuffer(this.updateServer.crcTable.length);
+                this.updateServer.crcTable.copy(cacheFile, 0, 0);
+            } else {
+                cacheFile = readIndexedDataChunk(file, index, this.updateServer.filestore.channels).dataFile;
+            }
+        } catch(error) {
+            logger.warn(`Unable to load filestore file for update server request`, index, file);
         }
 
         if(!cacheFile || cacheFile.length === 0) {
