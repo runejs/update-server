@@ -1,9 +1,8 @@
 import { logger } from '@runejs/core';
 import { ByteBuffer } from '@runejs/core/buffer';
 import { openServer, SocketConnectionHandler, parseServerConfig } from '@runejs/core/net';
-import { Filestore, readIndexedDataChunk } from '@runejs/filestore';
 import { Socket } from 'net';
-import * as CRC32 from 'crc-32';
+import { FileStore, compressVersionedFile } from '../../filestore';
 
 
 interface ServerConfig {
@@ -59,7 +58,7 @@ class UpdateServerConnection extends SocketConnectionHandler {
                             this.files.push({ index, file });
                             break;
                         case 1: // immediate
-                            this.gameServerSocket.write(this.generateFile(index, file));
+                            this.gameServerSocket.write(await this.generateFile(index, file));
                             break;
                         case 2:
                         case 3: // clear queue
@@ -71,7 +70,7 @@ class UpdateServerConnection extends SocketConnectionHandler {
 
                     while(this.files.length > 0) {
                         const info = this.files.shift();
-                        this.gameServerSocket.write(this.generateFile(info.index, info.file));
+                        this.gameServerSocket.write(await this.generateFile(info.index, info.file));
                     }
                 }
                 break;
@@ -85,18 +84,28 @@ class UpdateServerConnection extends SocketConnectionHandler {
     public connectionDestroyed(): void {
     }
 
-    private generateFile(index: number, file: number): Buffer {
+    private async generateFile(index: number, file: number): Promise<Buffer> {
         let cacheFile: ByteBuffer;
+
+        logger.info(`File request ${index} ${file}`);
 
         try {
             if(index === 255 && file === 255) {
                 cacheFile = new ByteBuffer(this.updateServer.crcTable.length);
                 this.updateServer.crcTable.copy(cacheFile, 0, 0);
+            } else if(index === 255) {
+                const buffer = await this.updateServer.fileStore.indexedArchives.get(file).compressIndexData();
+                cacheFile = compressVersionedFile({
+                    buffer,
+                    compression: 0,
+                    version: 0
+                });
             } else {
-                cacheFile = readIndexedDataChunk(file, index, this.updateServer.filestore.channels).dataFile;
+                cacheFile = await this.updateServer.fileStore.getFile(index, file, true);
             }
         } catch(error) {
-            logger.warn(`Unable to load filestore file for update server request`, index, file);
+            logger.error(`Unable to load filestore file for update server request`, index, file);
+            logger.error(error);
         }
 
         if(!cacheFile || cacheFile.length === 0) {
@@ -104,23 +113,20 @@ class UpdateServerConnection extends SocketConnectionHandler {
         }
 
         const buffer = new ByteBuffer((cacheFile.length - 2) + ((cacheFile.length - 2) / 511) + 8);
-        buffer.put(index, 'BYTE');
-        buffer.put(file, 'SHORT');
 
-        let length: number = ((cacheFile.at(1, 'UNSIGNED') << 24) + (cacheFile.at(2, 'UNSIGNED') << 16) +
-            (cacheFile.at(3, 'UNSIGNED') << 8) + cacheFile.at(4, 'UNSIGNED')) + 9;
-        if(cacheFile.at(0) === 0) {
-            length -= 4;
-        }
+        buffer.put(index);
+        buffer.put(file, 'short');
+
+        logger.info(`Compressed file length ${cacheFile.length}`);
 
         let c = 3;
-        for(let i = 0; i < length; i++) {
+        for(let i = 0; i < cacheFile.length; i++) {
             if(c === 512) {
-                buffer.put(255, 'BYTE');
+                buffer.put(255);
                 c = 1;
             }
 
-            buffer.put(cacheFile.at(i), 'BYTE');
+            buffer.put(cacheFile.at(i));
             c++;
         }
 
@@ -132,8 +138,9 @@ class UpdateServerConnection extends SocketConnectionHandler {
 class UpdateServer {
 
     public readonly serverConfig: ServerConfig;
-    public readonly filestore: Filestore;
-    public readonly crcTable: ByteBuffer;
+    public fileStore: FileStore;
+    public crcTable: ByteBuffer;
+    public indexChannels: ByteBuffer[];
 
     public constructor(host?: string, port?: number, cacheDir?: string) {
         if(!host) {
@@ -145,32 +152,18 @@ class UpdateServer {
                 cacheDir
             };
         }
-
-        this.filestore = new Filestore(this.serverConfig.cacheDir, {
-            configDir: this.serverConfig.configDir || this.serverConfig.cacheDir,
-            xteas: {}
-        });
-        this.crcTable = this.generateCrcTable();
     }
 
-    private generateCrcTable(): ByteBuffer {
-        const index = this.filestore.channels.metaChannel;
-        const indexLength = index.length;
-        const buffer = new ByteBuffer(4048);
-        buffer.put(0, 'byte');
-        buffer.put(indexLength, 'int');
-        for(let file = 0; file < (indexLength / 6); file++) {
-            const crcValue = CRC32.buf(readIndexedDataChunk(file, 255, this.filestore.channels)?.dataFile);
-            buffer.put(crcValue, 'int');
-        }
-
-        return buffer;
+    public async loadFileStore(): Promise<void> {
+        this.fileStore = new FileStore('../filestore/stores');
+        this.crcTable = await this.fileStore.generateCrcTable();
     }
 
 }
 
-export const launchUpdateServer = (host?: string, port?: number, cacheDir?: string) => {
+export const launchUpdateServer = async (host?: string, port?: number, cacheDir?: string): Promise<void> => {
     const updateServer = new UpdateServer(host, port, cacheDir);
+    await updateServer.loadFileStore();
     openServer<UpdateServerConnection>('Update Server', updateServer.serverConfig.updateServerHost, updateServer.serverConfig.updateServerPort,
         socket => new UpdateServerConnection(updateServer, socket));
 };

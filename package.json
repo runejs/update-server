@@ -22,7 +22,7 @@
     "license": "GPL-3.0",
     "dependencies": {
         "@runejs/core": "^1.3.2",
-        "@runejs/filestore": "^0.12.3",
+        "@runejs/filestore": "file:../filestore",
         "crc-32": "^1.2.0",
         "js-yaml": "^3.13.1",
         "source-map-support": "^0.5.19",
