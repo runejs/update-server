@@ -1,3 +1,3 @@
 updateServerHost: '0.0.0.0'
 updateServerPort: 43592
-cacheDir: './cache'
+storeDir: '../filestore/stores'
