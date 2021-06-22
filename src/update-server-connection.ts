@@ -52,7 +52,13 @@ export class UpdateServerConnection extends SocketConnectionHandler {
                             this.files.push({ index, file });
                             break;
                         case 1: // immediate
-                            this.updateServer.generateFile(index, file).then(fileData => this.gameServerSocket.write(fileData));
+                            const fileData = this.updateServer.generateFile(index, file);
+                            if(fileData) {
+                                this.gameServerSocket.write(fileData);
+                            } else {
+                                logger.error(`File ${index} ${file} is missing.`);
+                                this.gameServerSocket.write(this.generateEmptyFile(index, file));
+                            }
                             break;
                         case 2:
                         case 3: // clear queue
@@ -64,8 +70,13 @@ export class UpdateServerConnection extends SocketConnectionHandler {
 
                     while(this.files.length > 0) {
                         const info = this.files.shift();
-                        this.updateServer.generateFile(info.index, info.file)
-                            .then(fileData => this.gameServerSocket.write(fileData));
+                        const fileData = this.updateServer.generateFile(info.index, info.file);
+                        if(fileData) {
+                            this.gameServerSocket.write(fileData);
+                        } else {
+                            logger.error(`File ${info.index} ${info.file} is missing.`);
+                            this.gameServerSocket.write(this.generateEmptyFile(info.index, info.file));
+                        }
                     }
                 }
                 break;
@@ -75,6 +86,16 @@ export class UpdateServerConnection extends SocketConnectionHandler {
     }
 
     public connectionDestroyed(): void {
+    }
+
+    public generateEmptyFile(index: number, file: number): Buffer {
+        const buffer = new ByteBuffer(9);
+        buffer.put(index);
+        buffer.put(file, 'short');
+        buffer.put(0); // compression
+        buffer.put(1, 'int'); // file length
+        buffer.put(0); // single byte of data
+        return Buffer.from(buffer);
     }
 
 }

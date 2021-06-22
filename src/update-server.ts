@@ -82,13 +82,20 @@ export default class UpdateServer {
                 }
 
                 this.indexFiles[index] = await indexedArchive.compressIndexData();
-                this.zipArchives[index] = await indexedArchive.loadZip();
+                // this.zipArchives[index] = await indexedArchive.loadZip();
                 logger.info(`Index file ${index} length: ${this.indexFiles[index].length}`);
             }
 
-            const realIndexFile = Buffer.from(extractIndexedFile(0, 255, clientCache.channels).dataFile);
+            for(let index = 0; index < indexCount; index++) {
+                logger.info(`Loading files for archive ${index}...`);
+                await this.fileStore.indexedArchives.get(index).unpack(true);
+                logger.info(`Archive ${index} loaded.`);
+            }
 
-            console.log('');
+
+            // const realIndexFile = Buffer.from(extractIndexedFile(0, 255, clientCache.channels).dataFile);
+
+            /*console.log('');
             console.log('');
             console.log(`Original index file 0 length: ${realIndexFile.length}`);
             console.log(realIndexFile);
@@ -111,15 +118,15 @@ export default class UpdateServer {
             console.log(Buffer.from(decompressedNewFile.buffer));
 
             console.log('');
-            console.log('');
+            console.log('');*/
             // const test = this.generateFile(255, 0);
         } catch(e) {
             logger.error(e);
         }
     }
 
-    public async generateFile(index: number, file: number): Promise<Buffer> {
-        logger.info(`File request ${index} ${file}`);
+    public generateFile(index: number, file: number): Buffer {
+        // logger.info(`File request ${index} ${file}`);
 
         if(index === 255 && file === 255) {
             const crcTableCopy = new ByteBuffer(this.crcTable.length);
@@ -144,7 +151,12 @@ export default class UpdateServer {
                     indexFile.copy(cacheFile, 0, 0);
                 }
             } else {
-                cacheFile = await this.fileStore.getFile(index, file, true, this.zipArchives[file]);
+                 const assetFile: ByteBuffer | null = this.fileStore.indexedArchives.get(index).files[file]?.fileData ||
+                     this.fileStore.indexedArchives.get(index).files[`${file}`]?.fileData || null;
+                 if(assetFile) {
+                     cacheFile = new ByteBuffer(assetFile.length);
+                     assetFile.copy(cacheFile, 0, 0);
+                 }
             }
         } catch(error) {
             logger.error(`Error requesting file(${file}) in index(${index}).`);
@@ -153,26 +165,26 @@ export default class UpdateServer {
 
         if(!cacheFile || cacheFile.length === 0) {
             logger.error(`File(${file}) in index(${index}) was not found.`);
-            const missingFile = new ByteBuffer(8);
+            /*const missingFile = new ByteBuffer(8);
             missingFile.put(index);
             missingFile.put(file, 'short');
             missingFile.put(0);
             missingFile.put(0, 'int');
-            return Buffer.from(missingFile);
+            return Buffer.from(missingFile);*/
+            return null;
         }
 
-        const length: number = cacheFile.length;
+        if(cacheFile.length < 5) {
+            logger.error(`File(${file}) in index(${index}) is corrupt.`);
+            return null;
+        }
+
+        const compression: number = cacheFile.get();
+        const length: number = cacheFile.get('int') + (compression === 0 ? 5 : 9);
         const buffer = new ByteBuffer((length - 2) + ((length - 2) / 511) + 8);
 
         buffer.put(index);
         buffer.put(file, 'short');
-
-        // Read the file length and set the length for the update server buffer
-        const compressedLength = ((cacheFile.at(1, 'u') << 24) + (cacheFile.at(2, 'u') << 16) +
-            (cacheFile.at(3, 'u') << 8) + cacheFile.at(4, 'u'));
-        if(index === 255) {
-            logger.info(`Index ${file} length ${compressedLength} actual length ${length}`);
-        }
 
         let s = 3;
         for(let i = 0; i < length; i++) {
@@ -185,9 +197,7 @@ export default class UpdateServer {
             s++;
         }
 
-        if(index === 255) {
-            logger.info(`Resulting length ${buffer.length} writer index ${buffer.writerIndex} s ${s}`);
-        }
+        // logger.info(`Resulting length ${buffer.length} writer index ${buffer.writerIndex} s ${s}`);
 
         return Buffer.from(buffer.flipWriter());
     }
