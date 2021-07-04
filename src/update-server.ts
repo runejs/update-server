@@ -64,10 +64,7 @@ export default class UpdateServer {
 
     public async loadFileStore(): Promise<void> {
         try {
-            const clientCache = new ClientFileStore('../filestore/packed', {
-                configDir: '../filestore/config',
-                xteas: {}
-            });
+            const start = Date.now();
 
             this.fileStore = new FileStore('../filestore/stores');
             this.crcTable = Buffer.from(await this.fileStore.generateCrcTable());
@@ -81,52 +78,28 @@ export default class UpdateServer {
                     continue;
                 }
 
-                this.indexFiles[index] = await indexedArchive.compressIndexData();
+                this.indexFiles[index] = await indexedArchive.generateIndexFile();
                 // this.zipArchives[index] = await indexedArchive.loadZip();
                 logger.info(`Index file ${index} length: ${this.indexFiles[index].length}`);
             }
 
             for(let index = 0; index < indexCount; index++) {
                 logger.info(`Loading files for archive ${index}...`);
-                await this.fileStore.indexedArchives.get(index).unpack(true);
+                await this.fileStore.indexedArchives.get(index).unpack(true, true);
                 logger.info(`Archive ${index} loaded.`);
             }
 
+            const end = Date.now();
+            const duration = end - start;
 
-            // const realIndexFile = Buffer.from(extractIndexedFile(0, 255, clientCache.channels).dataFile);
-
-            /*console.log('');
-            console.log('');
-            console.log(`Original index file 0 length: ${realIndexFile.length}`);
-            console.log(realIndexFile);
-            console.log('');
-
-            const decompressedOldFile = decompressVersionedFile(new ByteBuffer(realIndexFile));
-
-            console.log(`Original index file 0 decompressed length: ${decompressedOldFile.buffer.length}`);
-            console.log(Buffer.from(decompressedOldFile.buffer));
-
-            console.log('');
-            console.log('');
-            console.log(`New index file 0 compressed length: ${this.indexFiles[0].length}`);
-            console.log(this.indexFiles[0]);
-            console.log('');
-
-            const decompressedNewFile = decompressVersionedFile(new ByteBuffer(this.indexFiles[0]));
-
-            console.log(`New index file 0 decompressed length: ${decompressedNewFile.buffer.length}`);
-            console.log(Buffer.from(decompressedNewFile.buffer));
-
-            console.log('');
-            console.log('');*/
-            // const test = this.generateFile(255, 0);
+            logger.info(`FileStore loaded in ${duration / 1000} seconds.`);
         } catch(e) {
             logger.error(e);
         }
     }
 
     public generateFile(index: number, file: number): Buffer {
-        // logger.info(`File request ${index} ${file}`);
+        logger.info(`File request ${index} ${file}`);
 
         if(index === 255 && file === 255) {
             const crcTableCopy = new ByteBuffer(this.crcTable.length);
@@ -151,11 +124,10 @@ export default class UpdateServer {
                     indexFile.copy(cacheFile, 0, 0);
                 }
             } else {
-                 const assetFile: ByteBuffer | null = this.fileStore.indexedArchives.get(index).files[file]?.fileData ||
-                     this.fileStore.indexedArchives.get(index).files[`${file}`]?.fileData || null;
-                 if(assetFile) {
-                     cacheFile = new ByteBuffer(assetFile.length);
-                     assetFile.copy(cacheFile, 0, 0);
+                 const indexedFile = this.fileStore.indexedArchives.get(index).files[file];
+                 if(indexedFile?.compressedFileData) {
+                     cacheFile = new ByteBuffer(indexedFile.compressedFileData.length);
+                     indexedFile.compressedFileData.copy(cacheFile, 0, 0);
                  }
             }
         } catch(error) {
