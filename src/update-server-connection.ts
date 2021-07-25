@@ -52,13 +52,14 @@ export class UpdateServerConnection extends SocketConnectionHandler {
                             this.files.push({ index, file });
                             break;
                         case 1: // immediate
-                            const fileData = this.updateServer.generateFile(index, file);
-                            if(fileData) {
-                                this.gameServerSocket.write(fileData);
-                            } else {
-                                logger.error(`File ${index} ${file} is missing.`);
-                                this.gameServerSocket.write(this.generateEmptyFile(index, file));
-                            }
+                            this.updateServer.generateFile(index, file).then(fileData => {
+                                if(fileData) {
+                                    this.gameServerSocket.write(fileData);
+                                } else {
+                                    logger.error(`File ${index} ${file} is missing.`);
+                                    this.gameServerSocket.write(this.generateEmptyFile(index, file));
+                                }
+                            });
                             break;
                         case 2:
                         case 3: // clear queue
@@ -70,13 +71,14 @@ export class UpdateServerConnection extends SocketConnectionHandler {
 
                     while(this.files.length > 0) {
                         const info = this.files.shift();
-                        const fileData = this.updateServer.generateFile(info.index, info.file);
-                        if(fileData) {
-                            this.gameServerSocket.write(fileData);
-                        } else {
-                            logger.error(`File ${info.index} ${info.file} is missing.`);
-                            this.gameServerSocket.write(this.generateEmptyFile(info.index, info.file));
-                        }
+                        this.updateServer.generateFile(info.index, info.file).then(fileData => {
+                            if(fileData) {
+                                this.gameServerSocket.write(fileData);
+                            } else {
+                                logger.error(`File ${info.index} ${info.file} is missing.`);
+                                this.gameServerSocket.write(this.generateEmptyFile(info.index, info.file));
+                            }
+                        });
                     }
                 }
                 break;

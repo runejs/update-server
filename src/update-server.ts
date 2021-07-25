@@ -1,14 +1,11 @@
 import { openServer, parseServerConfig } from '@runejs/core/net';
 import {
-    ClientFileStore,
-    compressVersionedFile, decompressVersionedFile,
-    extractIndexedFile,
-    FileStore,
-    getCompressionKey
+    FileStore
 } from '../../filestore';
 import { UpdateServerConnection } from './update-server-connection';
 import { logger } from '@runejs/core';
 import { ByteBuffer } from '@runejs/core/buffer';
+import { IndexName } from '../../filestore/dist/file-store/archive';
 
 
 export const defaultStoreDirectory = '../filestore/stores';
@@ -70,7 +67,7 @@ export default class UpdateServer {
             this.crcTable = Buffer.from(await this.fileStore.generateCrcTable());
             const indexCount = this.fileStore.indexedArchives.size;
             this.indexFiles = new Array(indexCount);
-            this.zipArchives = new Array(indexCount);
+            // this.zipArchives = new Array(indexCount);
 
             for(let index = 0; index < indexCount; index++) {
                 const indexedArchive = this.fileStore.indexedArchives.get(index);
@@ -85,7 +82,7 @@ export default class UpdateServer {
 
             for(let index = 0; index < indexCount; index++) {
                 logger.info(`Loading files for archive ${index}...`);
-                await this.fileStore.indexedArchives.get(index).unpack(true, true);
+                await this.fileStore.indexedArchives.get(index).unpack(true, false);
                 logger.info(`Archive ${index} loaded.`);
             }
 
@@ -98,8 +95,8 @@ export default class UpdateServer {
         }
     }
 
-    public generateFile(index: number, file: number): Buffer {
-        logger.info(`File request ${index} ${file}`);
+    public async generateFile(index: number, file: number): Promise<Buffer> {
+        logger.info(`File requested: ${index} ${file}`);
 
         if(index === 255 && file === 255) {
             const crcTableCopy = new ByteBuffer(this.crcTable.length);
@@ -113,6 +110,7 @@ export default class UpdateServer {
         }
 
         let cacheFile: ByteBuffer;
+        let indexName: IndexName = 'main';
 
         try {
              if(index === 255) {
@@ -124,19 +122,26 @@ export default class UpdateServer {
                     indexFile.copy(cacheFile, 0, 0);
                 }
             } else {
-                 const indexedFile = this.fileStore.indexedArchives.get(index).files[file];
-                 if(indexedFile?.compressedFileData) {
-                     cacheFile = new ByteBuffer(indexedFile.compressedFileData.length);
-                     indexedFile.compressedFileData.copy(cacheFile, 0, 0);
+                 const indexedArchive = this.fileStore.indexedArchives.get(index);
+                 indexName = indexedArchive.manifest.name;
+                 const indexedFile = indexedArchive.files[file];
+                 if(indexedFile) {
+                     if(!indexedFile.fileDataCompressed) {
+                         await indexedFile.compress();
+                     }
+                     if(indexedFile.fileData) {
+                         cacheFile = new ByteBuffer(indexedFile.fileData.length);
+                         indexedFile.fileData.copy(cacheFile, 0, 0);
+                     }
                  }
             }
         } catch(error) {
-            logger.error(`Error requesting file(${file}) in index(${index}).`);
+            logger.error(`Error requesting file ${file} in index ${index}.`);
             logger.error(error);
         }
 
         if(!cacheFile || cacheFile.length === 0) {
-            logger.error(`File(${file}) in index(${index}) was not found.`);
+            logger.error(`File ${file} in index ${indexName} was not found.`);
             /*const missingFile = new ByteBuffer(8);
             missingFile.put(index);
             missingFile.put(file, 'short');
@@ -147,7 +152,7 @@ export default class UpdateServer {
         }
 
         if(cacheFile.length < 5) {
-            logger.error(`File(${file}) in index(${index}) is corrupt.`);
+            logger.error(`File ${file} in index ${indexName} is corrupt.`);
             return null;
         }
 
