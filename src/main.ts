@@ -5,4 +5,4 @@ import { logger } from '@runejs/core';
 
 UpdateServer.launch()
     .then(() => logger.info(`Ready to accept connections.`))
-    .catch(() => logger.error(`Error launching Update Server.`));
+    .catch(error => logger.error(`Error launching Update Server.`, error));

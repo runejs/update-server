@@ -1,21 +1,11 @@
-import { openServer, parseServerConfig } from '@runejs/core/net';
-import {
-    FileStore
-} from '../../filestore';
-import { UpdateServerConnection } from './update-server-connection';
+import { parseServerConfig, SocketServer } from '@runejs/core/net';
+import { FileStore } from '../../filestore';
+import { UpdateServerConnection } from './net/update-server-connection';
 import { logger } from '@runejs/core';
 import { ByteBuffer } from '@runejs/core/buffer';
 import { IndexName } from '../../filestore/dist/file-store/archive';
-
-
-export const defaultStoreDirectory = '../filestore/stores';
-
-
-export interface UpdateServerConfig {
-    updateServerHost: string;
-    updateServerPort: number;
-    storeDir: string;
-}
+import { FileRequest } from './net/file-request';
+import { defaultConfig, UpdateServerConfig } from './config/update-server-config';
 
 
 export default class UpdateServer {
@@ -25,8 +15,6 @@ export default class UpdateServer {
     public crcTable: Buffer;
     public indexFiles: ByteBuffer[];
 
-    private zipArchives: any[];
-
     public constructor(host?: string, port?: number) {
         if(!host) {
             this.serverConfig = parseServerConfig<UpdateServerConfig>();
@@ -34,16 +22,24 @@ export default class UpdateServer {
             this.serverConfig = {
                 updateServerHost: host,
                 updateServerPort: port,
-                storeDir: defaultStoreDirectory
+                storeDir: defaultConfig.storeDir,
+                clientVersion: defaultConfig.clientVersion
             };
         }
 
         if(!this.serverConfig.updateServerHost || !this.serverConfig.updateServerPort) {
-            throw new Error(`Please provide a valid host and port for the Update Server.`);
+            throw new Error(`Update Server host or port not provided. ` +
+                `Please add updateServerHost and updateServerPort to your configuration file.`);
         }
 
         if(!this.serverConfig.storeDir) {
-            throw new Error(`Update Server asset store directory was not provided. Please add storeDir to the Update Server configuration file.`);
+            throw new Error(`Update Server asset store directory was not provided. ` +
+                `Please add storeDir to your configuration file.`);
+        }
+
+        if(!this.serverConfig.clientVersion) {
+            throw new Error(`Update Server supported client version was not provided. ` +
+                `Please add clientVersion to your configuration file.`);
         }
     }
 
@@ -52,7 +48,7 @@ export default class UpdateServer {
 
         await updateServer.loadFileStore();
 
-        openServer<UpdateServerConnection>('Update Server',
+        SocketServer.launch<UpdateServerConnection>('Update Server',
             updateServer.serverConfig.updateServerHost, updateServer.serverConfig.updateServerPort,
             socket => new UpdateServerConnection(updateServer, socket));
 
@@ -67,7 +63,6 @@ export default class UpdateServer {
             this.crcTable = Buffer.from(await this.fileStore.generateCrcTable());
             const indexCount = this.fileStore.indexedArchives.size;
             this.indexFiles = new Array(indexCount);
-            // this.zipArchives = new Array(indexCount);
 
             for(let index = 0; index < indexCount; index++) {
                 const indexedArchive = this.fileStore.indexedArchives.get(index);
@@ -76,7 +71,6 @@ export default class UpdateServer {
                 }
 
                 this.indexFiles[index] = await indexedArchive.generateIndexFile();
-                // this.zipArchives[index] = await indexedArchive.loadZip();
                 logger.info(`Index file ${index} length: ${this.indexFiles[index].length}`);
             }
 
@@ -95,73 +89,56 @@ export default class UpdateServer {
         }
     }
 
-    public async generateFile(index: number, file: number): Promise<Buffer> {
-        logger.info(`File requested: ${index} ${file}`);
+    public async handleFileRequest(fileRequest: FileRequest): Promise<Buffer> {
+        const { indexId, fileId } = fileRequest;
 
-        if(index === 255 && file === 255) {
-            const crcTableCopy = new ByteBuffer(this.crcTable.length);
-            this.crcTable.copy(crcTableCopy, 0, 0);
-
-            const crcFileBuffer = new ByteBuffer(86);
-            crcFileBuffer.put(255);
-            crcFileBuffer.put(255, 'short');
-            crcFileBuffer.putBytes(crcTableCopy, 0, 83);
-            return Buffer.from(crcFileBuffer);
+        if(indexId === 255) {
+            return fileId === 255 ? this.generateCrcTableFile() : this.generateArchiveIndexFile(fileId);
         }
 
-        let cacheFile: ByteBuffer;
-        let indexName: IndexName = 'main';
+        const indexedArchive = indexId === 255 ? null : this.fileStore.indexedArchives.get(indexId);
+        const indexName: IndexName = indexedArchive?.manifest?.name ?? 'main';
 
-        try {
-             if(index === 255) {
-                const indexFile = this.indexFiles[file];
-                if(!indexFile) {
-                    logger.error(`Index file ${file} not found.`);
-                } else {
-                    cacheFile = new ByteBuffer(indexFile.length);
-                    indexFile.copy(cacheFile, 0, 0);
-                }
-            } else {
-                 const indexedArchive = this.fileStore.indexedArchives.get(index);
-                 indexName = indexedArchive.manifest.name;
-                 const indexedFile = indexedArchive.files[file];
-                 if(indexedFile) {
-                     if(!indexedFile.fileDataCompressed) {
-                         await indexedFile.compress();
-                     }
-                     if(indexedFile.fileData) {
-                         cacheFile = new ByteBuffer(indexedFile.fileData.length);
-                         indexedFile.fileData.copy(cacheFile, 0, 0);
-                     }
-                 }
+        logger.info(`Asset file requested: ${indexName} ${fileId}`);
+
+        const indexedFile = indexedArchive.files[fileId];
+        if(indexedFile) {
+            if(!indexedFile.fileDataCompressed) {
+                await indexedFile.compress();
             }
-        } catch(error) {
-            logger.error(`Error requesting file ${file} in index ${index}.`);
-            logger.error(error);
+            if(indexedFile.fileData) {
+                const cacheFile = new ByteBuffer(indexedFile.fileData.length);
+                indexedFile.fileData.copy(cacheFile, 0, 0);
+                return this.createFileResponse(fileRequest, cacheFile);
+            }
         }
 
-        if(!cacheFile || cacheFile.length === 0) {
-            logger.error(`File ${file} in index ${indexName} was not found.`);
-            /*const missingFile = new ByteBuffer(8);
-            missingFile.put(index);
-            missingFile.put(file, 'short');
-            missingFile.put(0);
-            missingFile.put(0, 'int');
-            return Buffer.from(missingFile);*/
+        logger.error(`File ${fileId} in index ${indexName} is empty.`);
+        return null;
+    }
+
+    protected createFileResponse(fileRequest: FileRequest, fileDataBuffer: ByteBuffer): Buffer | null {
+        const { indexId, fileId } = fileRequest;
+
+        const indexedArchive = indexId === 255 ? null : this.fileStore.indexedArchives.get(indexId);
+        const indexName: IndexName = indexedArchive?.manifest?.name ?? 'main';
+
+        if(!fileDataBuffer || fileDataBuffer.length === 0) {
+            logger.error(`File ${fileId} in index ${indexName} was not found.`);
             return null;
         }
 
-        if(cacheFile.length < 5) {
-            logger.error(`File ${file} in index ${indexName} is corrupt.`);
+        if(fileDataBuffer.length < 5) {
+            logger.error(`File ${fileId} in index ${indexName} is corrupt.`);
             return null;
         }
 
-        const compression: number = cacheFile.get();
-        const length: number = cacheFile.get('int') + (compression === 0 ? 5 : 9);
+        const compression: number = fileDataBuffer.get('byte');
+        const length: number = fileDataBuffer.get('int') + (compression === 0 ? 5 : 9);
         const buffer = new ByteBuffer((length - 2) + ((length - 2) / 511) + 8);
 
-        buffer.put(index);
-        buffer.put(file, 'short');
+        buffer.put(indexId);
+        buffer.put(fileId, 'short');
 
         let s = 3;
         for(let i = 0; i < length; i++) {
@@ -170,13 +147,38 @@ export default class UpdateServer {
                 s = 1;
             }
 
-            buffer.put(cacheFile.at(i));
+            buffer.put(fileDataBuffer.at(i));
             s++;
         }
 
-        // logger.info(`Resulting length ${buffer.length} writer index ${buffer.writerIndex} s ${s}`);
-
         return Buffer.from(buffer.flipWriter());
+    }
+
+    protected generateArchiveIndexFile(archiveId: number): Buffer {
+        const indexFile = this.indexFiles[archiveId];
+        const cacheFile = new ByteBuffer(indexFile.length);
+        indexFile.copy(cacheFile, 0, 0);
+        return this.createFileResponse({ indexId: 255, fileId: archiveId }, indexFile);
+    }
+
+    protected generateCrcTableFile(): Buffer {
+        const crcTableCopy = new ByteBuffer(this.crcTable.length);
+        this.crcTable.copy(crcTableCopy, 0, 0);
+        const crcFileBuffer = new ByteBuffer(86);
+        crcFileBuffer.put(255);
+        crcFileBuffer.put(255, 'short');
+        crcFileBuffer.putBytes(crcTableCopy, 0, 83);
+        return Buffer.from(crcFileBuffer);
+    }
+
+    protected generateEmptyFile(index: number, file: number): Buffer {
+        const buffer = new ByteBuffer(9);
+        buffer.put(index);
+        buffer.put(file, 'short');
+        buffer.put(0); // compression
+        buffer.put(1, 'int'); // file length
+        buffer.put(0); // single byte of data
+        return Buffer.from(buffer);
     }
 
 }

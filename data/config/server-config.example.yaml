@@ -1,3 +1,0 @@
-updateServerHost: '0.0.0.0'
-updateServerPort: 43592
-storeDir: '../filestore/stores'

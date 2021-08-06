@@ -1,2 +1,3 @@
 export * from './update-server';
-export * from './update-server-connection';
+export * from './net/update-server-connection';
+export { UpdateServerConfig } from './config/update-server-config';
