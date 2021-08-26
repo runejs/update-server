@@ -1,6 +1,6 @@
 {
     "name": "@runejs/update-server",
-    "version": "1.1.1",
+    "version": "1.1.3",
     "description": "RuneJS Game Update Server",
     "main": "dist/index.js",
     "types": "dist/index.d.ts",
@@ -22,7 +22,7 @@
     "license": "GPL-3.0",
     "dependencies": {
         "@runejs/core": "^1.3.2",
-        "@runejs/filestore": "^0.12.3",
+        "@runejs/filestore": "^0.14.2",
         "crc-32": "^1.2.0",
         "js-yaml": "^3.13.1",
         "source-map-support": "^0.5.19",
@@ -31,7 +31,7 @@
         "typescript": "^4.2.4"
     },
     "devDependencies": {
-        "@babel/cli": "^7.10.1",
+        "@babel/cli": "^7.14.8",
         "@babel/core": "^7.10.2",
         "@babel/node": "^7.12.1",
         "@babel/plugin-proposal-class-properties": "^7.10.1",
