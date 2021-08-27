@@ -154,8 +154,8 @@ class UpdateServer {
 }
 
 
-export const launchUpdateServer = (cacheDir?: string) => {
-    const updateServer = new UpdateServer(cacheDir);
+export const launchUpdateServer = (configDir?: string) => {
+    const updateServer = new UpdateServer(configDir);
     const { updateServerHost, updateServerPort } = updateServer.serverConfig;
     SocketServer.launch<UpdateServerConnection>(
         'Update Server',
