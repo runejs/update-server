@@ -1,6 +1,6 @@
 {
     "name": "@runejs/update-server",
-    "version": "1.2.0",
+    "version": "1.2.2",
     "description": "RuneJS Game Update Server",
     "main": "lib/index.js",
     "types": "lib/index.d.ts",
@@ -22,8 +22,8 @@
     "author": "Tynarus",
     "license": "GPL-3.0",
     "dependencies": {
-        "@runejs/core": "^1.5.1",
-        "@runejs/filestore": "^0.15.0",
+        "@runejs/core": "^1.5.4",
+        "@runejs/filestore": "^0.15.2",
         "crc-32": "^1.2.0",
         "source-map-support": "^0.5.19",
         "tslib": "^2.2.0"
