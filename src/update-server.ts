@@ -1,6 +1,6 @@
 import { logger } from '@runejs/core';
 import { ByteBuffer } from '@runejs/core/buffer';
-import { openServer, SocketConnectionHandler, parseServerConfig } from '@runejs/core/net';
+import { parseServerConfig, SocketServer } from '@runejs/core/net';
 import { Filestore, readIndexedDataChunk } from '@runejs/filestore';
 import { Socket } from 'net';
 import * as CRC32 from 'crc-32';
@@ -18,68 +18,59 @@ enum ConnectionStage {
     ACTIVE = 'active'
 }
 
-class UpdateServerConnection extends SocketConnectionHandler {
+class UpdateServerConnection extends SocketServer {
 
     private connectionStage: ConnectionStage = ConnectionStage.HANDSHAKE;
     private files: { file: number, index: number }[] = [];
 
     public constructor(private readonly updateServer: UpdateServer,
-                       private readonly gameServerSocket: Socket) {
-        super();
+                       gameServerSocket: Socket) {
+        super(gameServerSocket);
     }
 
-    public async dataReceived(buffer: ByteBuffer): Promise<void> {
-        if(!buffer) {
-            logger.info('No data supplied in message to update server.');
-            return;
+    public initialHandshake(buffer: ByteBuffer): boolean {
+        const gameVersion = buffer.get('INT');
+        const outputBuffer = new ByteBuffer(1);
+
+        if(gameVersion === 435) {
+            outputBuffer.put(0); // good to go!
+            this.connectionStage = ConnectionStage.ACTIVE;
+            this.socket.write(outputBuffer);
+            return true;
+        } else {
+            outputBuffer.put(6); // out of date
+            this.socket.write(outputBuffer);
+            return false;
         }
+    }
 
-        switch(this.connectionStage) {
-            case ConnectionStage.HANDSHAKE:
-                const gameVersion = buffer.get('INT');
-                const outputBuffer = new ByteBuffer(1);
 
-                if(gameVersion === 435) {
-                    outputBuffer.put(0); // good to go!
-                    this.connectionStage = ConnectionStage.ACTIVE;
-                    this.gameServerSocket.write(outputBuffer);
-                } else {
-                    outputBuffer.put(6); // out of date
-                    this.gameServerSocket.write(outputBuffer);
-                }
-                break;
-            case ConnectionStage.ACTIVE:
-                while(buffer.readable >= 4) {
-                    const type = buffer.get('byte', 'u');
-                    const index = buffer.get('byte', 'u');
-                    const file = buffer.get('short', 'u');
+    public decodeMessage(buffer: ByteBuffer): void {
+        while(buffer.readable >= 4) {
+            const type = buffer.get('byte', 'u');
+            const index = buffer.get('byte', 'u');
+            const file = buffer.get('short', 'u');
 
-                    switch(type) {
-                        case 0: // queue
-                            this.files.push({ index, file });
-                            break;
-                        case 1: // immediate
-                            this.gameServerSocket.write(this.generateFile(index, file));
-                            break;
-                        case 2:
-                        case 3: // clear queue
-                            this.files = [];
-                            break;
-                        case 4: // error
-                            break;
-                    }
+            switch(type) {
+                case 0: // queue
+                    this.files.push({ index, file });
+                    break;
+                case 1: // immediate
+                    this.socket.write(this.generateFile(index, file));
+                    break;
+                case 2:
+                case 3: // clear queue
+                    this.files = [];
+                    break;
+                case 4: // error
+                    break;
+            }
 
-                    while(this.files.length > 0) {
-                        const info = this.files.shift();
-                        this.gameServerSocket.write(this.generateFile(info.index, info.file));
-                    }
-                }
-                break;
-            default:
-                break;
+            while(this.files.length > 0) {
+                const info = this.files.shift();
+                this.socket.write(this.generateFile(info.index, info.file));
+            }
         }
-
-        return Promise.resolve(undefined);
     }
 
     public connectionDestroyed(): void {
@@ -129,22 +120,15 @@ class UpdateServerConnection extends SocketConnectionHandler {
 
 }
 
+
 class UpdateServer {
 
     public readonly serverConfig: ServerConfig;
     public readonly filestore: Filestore;
     public readonly crcTable: ByteBuffer;
 
-    public constructor(host?: string, port?: number, cacheDir?: string) {
-        if(!host) {
-            this.serverConfig = parseServerConfig<ServerConfig>();
-        } else {
-            this.serverConfig = {
-                updateServerHost: host,
-                updateServerPort: port,
-                cacheDir
-            };
-        }
+    public constructor(configDir?: string) {
+        this.serverConfig = parseServerConfig<ServerConfig>({ configDir });
 
         this.filestore = new Filestore(this.serverConfig.cacheDir, {
             configDir: this.serverConfig.configDir || this.serverConfig.cacheDir,
@@ -169,8 +153,13 @@ class UpdateServer {
 
 }
 
-export const launchUpdateServer = (host?: string, port?: number, cacheDir?: string) => {
-    const updateServer = new UpdateServer(host, port, cacheDir);
-    openServer<UpdateServerConnection>('Update Server', updateServer.serverConfig.updateServerHost, updateServer.serverConfig.updateServerPort,
-        socket => new UpdateServerConnection(updateServer, socket));
+
+export const launchUpdateServer = (cacheDir?: string) => {
+    const updateServer = new UpdateServer(cacheDir);
+    const { updateServerHost, updateServerPort } = updateServer.serverConfig;
+    SocketServer.launch<UpdateServerConnection>(
+        'Update Server',
+        updateServerHost, updateServerPort,
+        socket => new UpdateServerConnection(updateServer, socket)
+    );
 };
