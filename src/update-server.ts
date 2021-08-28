@@ -1,11 +1,10 @@
-import { parseServerConfig, SocketServer } from '@runejs/core/net';
-import { FileStore } from '../../filestore';
-import { UpdateServerConnection } from './net/update-server-connection';
-import { logger } from '@runejs/core';
-import { ByteBuffer } from '@runejs/core/buffer';
-import { IndexName } from '../../filestore/dist/file-store/archive';
 import { FileRequest } from './net/file-request';
-import { defaultConfig, UpdateServerConfig } from './config/update-server-config';
+import { UpdateServerConfig } from './config/update-server-config';
+import { parseServerConfig, SocketServer } from '@runejs/core/net';
+import { UpdateServerConnection } from './net/update-server-connection';
+import { FileStore, getIndexName, IndexName } from '../../filestore';
+import { ByteBuffer } from '@runejs/core/buffer';
+import { logger } from '@runejs/core';
 
 
 export default class UpdateServer {
@@ -15,27 +14,11 @@ export default class UpdateServer {
     public crcTable: Buffer;
     public indexFiles: ByteBuffer[];
 
-    public constructor(host?: string, port?: number) {
-        if(!host) {
-            this.serverConfig = parseServerConfig<UpdateServerConfig>();
-        } else {
-            this.serverConfig = {
-                updateServerHost: host,
-                updateServerPort: port,
-                storeDir: defaultConfig.storeDir,
-                clientVersion: defaultConfig.clientVersion
-            };
-        }
+    private incomingRequests: string[] = [];
+    private batchLimit: number = 30;
 
-        if(!this.serverConfig.updateServerHost || !this.serverConfig.updateServerPort) {
-            throw new Error(`Update Server host or port not provided. ` +
-                `Please add updateServerHost and updateServerPort to your configuration file.`);
-        }
-
-        if(!this.serverConfig.storeDir) {
-            throw new Error(`Update Server asset store directory was not provided. ` +
-                `Please add storeDir to your configuration file.`);
-        }
+    public constructor(configDir?: string) {
+        this.serverConfig = parseServerConfig<UpdateServerConfig>({ configDir });
 
         if(!this.serverConfig.clientVersion) {
             throw new Error(`Update Server supported client version was not provided. ` +
@@ -43,8 +26,8 @@ export default class UpdateServer {
         }
     }
 
-    public static async launch(host?: string, port?: number): Promise<UpdateServer> {
-        const updateServer = new UpdateServer(host, port);
+    public static async launch(configDir?: string): Promise<UpdateServer> {
+        const updateServer = new UpdateServer(configDir);
 
         await updateServer.loadFileStore();
 
@@ -97,9 +80,14 @@ export default class UpdateServer {
         }
 
         const indexedArchive = indexId === 255 ? null : this.fileStore.indexedArchives.get(indexId);
-        const indexName: IndexName = indexedArchive?.manifest?.name ?? 'main';
+        const indexName: IndexName = getIndexName(indexId);
 
-        logger.info(`Asset file requested: ${indexName} ${fileId}`);
+        // this.incomingRequests.push(`${indexName} ${fileId}`);
+        //
+        // if(this.incomingRequests.length >= this.batchLimit) {
+        //     logger.info(`${this.batchLimit} files requested: ${this.incomingRequests.join(', ')}`);
+        //     this.incomingRequests = [];
+        // }
 
         const indexedFile = indexedArchive.files[fileId];
         if(indexedFile) {
@@ -120,13 +108,7 @@ export default class UpdateServer {
     protected createFileResponse(fileRequest: FileRequest, fileDataBuffer: ByteBuffer): Buffer | null {
         const { indexId, fileId } = fileRequest;
 
-        const indexedArchive = indexId === 255 ? null : this.fileStore.indexedArchives.get(indexId);
-        const indexName: IndexName = indexedArchive?.manifest?.name ?? 'main';
-
-        if(!fileDataBuffer || fileDataBuffer.length === 0) {
-            logger.error(`File ${fileId} in index ${indexName} was not found.`);
-            return null;
-        }
+        const indexName: IndexName = getIndexName(indexId);
 
         if(fileDataBuffer.length < 5) {
             logger.error(`File ${fileId} in index ${indexName} is corrupt.`);

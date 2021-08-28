@@ -1,8 +1,11 @@
 tsconfig.json
-src
-.idea
-cache/
+/src
+/.idea
+/cache
 .babelrc
 nodemon.json
 tslint.json
-data/config/
+/config/server-config.json
+/data/config
+server-config.yaml
+server-config.json

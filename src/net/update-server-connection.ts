@@ -1,17 +1,20 @@
 import { Socket } from 'net';
 import { ByteBuffer } from '@runejs/core/buffer';
 import { SocketServer } from '@runejs/core/net';
+import { logger } from '@runejs/core';
 
 import UpdateServer from '../update-server';
 import { FileRequest } from './file-request';
-import { ConnectionStage } from './connection-stage';
+import { getIndexName } from '../../../filestore';
+
+
+export const CONNECTION_ACCEPTED = 0;
+export const UNSUPPORTED_CLIENT_VERSION = 6;
 
 
 export class UpdateServerConnection extends SocketServer {
 
     private readonly updateServer: UpdateServer;
-
-    private connectionStage: ConnectionStage = ConnectionStage.HANDSHAKE;
     private fileRequests: FileRequest[] = [];
 
     public constructor(updateServer: UpdateServer,
@@ -21,20 +24,16 @@ export class UpdateServerConnection extends SocketServer {
     }
 
     public initialHandshake(buffer: ByteBuffer): boolean {
-        const gameVersion = buffer.get('int');
+        const clientVersion: number = buffer.get('int');
+        const supportedVersion: number = this.updateServer.serverConfig.clientVersion;
 
-        const outputBuffer = new ByteBuffer(1);
+        const responseCode: number = clientVersion === supportedVersion ? CONNECTION_ACCEPTED : UNSUPPORTED_CLIENT_VERSION;
+        const success: boolean = responseCode === CONNECTION_ACCEPTED;
 
-        if(gameVersion === 435) {
-            this.connectionStage = ConnectionStage.ACTIVE;
-            outputBuffer.put(0); // good to go!
-            this.socket.write(outputBuffer);
-            return true;
-        } else {
-            outputBuffer.put(6); // out of date (incorrect client version number)
-            this.socket.write(outputBuffer);
-            return false;
-        }
+        // send the handshake response to the client
+        this.socket.write(Buffer.from([ responseCode ]));
+
+        return success;
     }
 
     public async decodeMessage(buffer: ByteBuffer): Promise<void> {
@@ -57,15 +56,13 @@ export class UpdateServerConnection extends SocketServer {
             const fileRequest: FileRequest = { indexId, fileId };
 
             if(requestMethod === 1) {
-                await this.sendFile(fileRequest);
+                this.sendFile(fileRequest);
             } else if(requestMethod === 0) {
                 this.fileRequests.push(fileRequest);
             }
         }
 
-        if(this.fileRequests.length > 0) {
-            await this.sendQueuedFiles();
-        }
+        this.sendQueuedFiles();
     }
 
     public connectionDestroyed(): void {
@@ -73,9 +70,14 @@ export class UpdateServerConnection extends SocketServer {
     }
 
     protected async sendQueuedFiles(): Promise<void> {
-        while(this.fileRequests.length > 0) {
-            await this.sendFile(this.fileRequests.shift());
+        if(!this.fileRequests.length) {
+            return;
         }
+
+        const fileRequests = [ ...this.fileRequests ];
+        this.fileRequests = [];
+
+        await Promise.all(fileRequests.map(fileRequest => this.sendFile(fileRequest)));
     }
 
     protected async sendFile(fileRequest: FileRequest): Promise<void> {
@@ -88,7 +90,7 @@ export class UpdateServerConnection extends SocketServer {
         if(requestedFile) {
             this.socket.write(requestedFile);
         } else {
-            // logger.error(`File ${fileId} in archive ${getIndexName(indexId)} is missing.`);
+            logger.error(`File ${fileRequest.fileId} in archive ${getIndexName(fileRequest.indexId)} is missing.`);
             // ^^^ this should have already been logged up the chain, no need to do it again here
             // ^^^ just leaving for reference while testing
             // this.socket.write(this.generateEmptyFile(indexId, fileId));
