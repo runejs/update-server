@@ -12,7 +12,7 @@ export default class UpdateServer {
     public readonly serverConfig: UpdateServerConfig;
     public fileStore: FileStore;
     public crcTable: Buffer;
-    public indexFiles: ByteBuffer[];
+    public indexFiles: Map<number, ByteBuffer> = new Map<number, ByteBuffer>();
 
     private incomingRequests: string[] = [];
     private batchLimit: number = 30;
@@ -43,44 +43,70 @@ export default class UpdateServer {
             const start = Date.now();
 
             this.fileStore = new FileStore('../filestore/stores');
-            this.crcTable = Buffer.from(await this.fileStore.generateCrcTable());
-            const indexCount = this.fileStore.indexedArchives.size;
-            this.indexFiles = new Array(indexCount);
 
-            for(let index = 0; index < indexCount; index++) {
-                const indexedArchive = this.fileStore.indexedArchives.get(index);
-                if(!indexedArchive) {
+            logger.info(`Generating main index file...`);
+            this.crcTable = Buffer.from(await this.fileStore.generateCrcTable());
+
+            const promises: Promise<void>[] = [];
+
+            for(const [ index, archive ] of this.fileStore.indexedArchives) {
+                if(!archive) {
                     continue;
                 }
 
-                this.indexFiles[index] = await indexedArchive.generateIndexFile();
-                logger.info(`Index file ${index} length: ${this.indexFiles[index].length}`);
+                const name = archive.archiveName;
+
+                logger.info(`Loading files for archive ${name}...`);
+
+                promises.push(archive.unpack(true, false).then(async () => {
+                    logger.info(`${archive.files.size} file(s) loaded.`);
+                    const indexFile = await archive.generateIndexFile();
+                    this.indexFiles.set(index, indexFile);
+                    logger.info(`${name} index file length: ${indexFile.length}`);
+                }));
             }
 
-            for(let index = 0; index < indexCount; index++) {
-                logger.info(`Loading files for archive ${index}...`);
-                await this.fileStore.indexedArchives.get(index).unpack(true, false);
-                logger.info(`Archive ${index} loaded.`);
+            await Promise.all(promises);
+
+            for(const [ , archive ] of this.fileStore.indexedArchives) {
+                if(!archive) {
+                    continue;
+                }
+
+                const name = archive.archiveName;
+                const groupPromises: Promise<ByteBuffer>[] = [];
+
+                logger.info(`Compressing ${name} archive groups...`);
+
+                for(const [ , group ] of archive.files) {
+                    if(group) {
+                        groupPromises.push(group.compress());
+                    }
+                }
+
+                const groupCount = (await Promise.all(groupPromises)).length;
+
+                logger.info(`Compressed ${groupCount} groups.`);
             }
 
             const end = Date.now();
             const duration = end - start;
 
-            logger.info(`FileStore loaded in ${duration / 1000} seconds.`);
+            logger.info(`File Store loaded in ${duration / 1000} seconds.`);
         } catch(e) {
             logger.error(e);
         }
     }
 
-    public async handleFileRequest(fileRequest: FileRequest): Promise<Buffer> {
-        const { indexId, fileId } = fileRequest;
+    public handleFileRequest(fileRequest: FileRequest): Buffer {
+        const { archiveIndex, fileIndex } = fileRequest;
 
-        if(indexId === 255) {
-            return fileId === 255 ? this.generateCrcTableFile() : this.generateArchiveIndexFile(fileId);
+        if(archiveIndex === 255) {
+            return fileIndex === 255 ? this.generateCrcTableFile() : this.generateArchiveIndexFile(fileIndex);
         }
 
-        const indexedArchive = indexId === 255 ? null : this.fileStore.indexedArchives.get(indexId);
-        const indexName: IndexName = getIndexName(indexId);
+        const indexedArchive = archiveIndex === 255 ? null : this.fileStore.indexedArchives.get(archiveIndex);
+        const indexName: IndexName = getIndexName(archiveIndex);
 
         // this.incomingRequests.push(`${indexName} ${fileId}`);
         //
@@ -89,10 +115,12 @@ export default class UpdateServer {
         //     this.incomingRequests = [];
         // }
 
-        const indexedFile = indexedArchive.files[fileId];
+        logger.info(`File requested: ${indexName} ${fileIndex}`);
+
+        const indexedFile = indexedArchive.files.get(fileIndex);
         if(indexedFile) {
             if(!indexedFile.fileDataCompressed) {
-                await indexedFile.compress();
+                // await indexedFile.compress();
             }
             if(indexedFile.fileData) {
                 const cacheFile = new ByteBuffer(indexedFile.fileData.length);
@@ -101,26 +129,34 @@ export default class UpdateServer {
             }
         }
 
-        logger.error(`File ${fileId} in index ${indexName} is empty.`);
+        // logger.error(`File ${fileIndex} in index ${indexName} is empty.`);
         return null;
     }
 
     protected createFileResponse(fileRequest: FileRequest, fileDataBuffer: ByteBuffer): Buffer | null {
-        const { indexId, fileId } = fileRequest;
+        const { archiveIndex, fileIndex } = fileRequest;
 
-        const indexName: IndexName = getIndexName(indexId);
+        const indexName: IndexName = getIndexName(archiveIndex);
 
         if(fileDataBuffer.length < 5) {
-            logger.error(`File ${fileId} in index ${indexName} is corrupt.`);
+            logger.error(`File ${fileIndex} in index ${indexName} is corrupt.`);
             return null;
         }
 
-        const compression: number = fileDataBuffer.get('byte');
-        const length: number = fileDataBuffer.get('int') + (compression === 0 ? 5 : 9);
-        const buffer = new ByteBuffer((length - 2) + ((length - 2) / 511) + 8);
+        const compression: number = fileDataBuffer.get('byte', 'unsigned');
+        const length: number = fileDataBuffer.get('int', 'unsigned') + (compression === 0 ? 5 : 9);
 
-        buffer.put(indexId);
-        buffer.put(fileId, 'short');
+        let buffer: ByteBuffer;
+
+        try {
+            buffer = new ByteBuffer((length - 2) + ((length - 2) / 511) + 8);
+        } catch(error) {
+            logger.error(`Invalid file length of ${length} detected.`);
+            return null;
+        }
+
+        buffer.put(archiveIndex);
+        buffer.put(fileIndex, 'short');
 
         let s = 3;
         for(let i = 0; i < length; i++) {
@@ -136,11 +172,11 @@ export default class UpdateServer {
         return Buffer.from(buffer.flipWriter());
     }
 
-    protected generateArchiveIndexFile(archiveId: number): Buffer {
-        const indexFile = this.indexFiles[archiveId];
+    protected generateArchiveIndexFile(archiveIndex: number): Buffer {
+        const indexFile = this.indexFiles.get(archiveIndex);
         const cacheFile = new ByteBuffer(indexFile.length);
         indexFile.copy(cacheFile, 0, 0);
-        return this.createFileResponse({ indexId: 255, fileId: archiveId }, indexFile);
+        return this.createFileResponse({ archiveIndex: 255, fileIndex: archiveIndex }, indexFile);
     }
 
     protected generateCrcTableFile(): Buffer {

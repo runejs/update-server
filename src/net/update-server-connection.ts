@@ -36,7 +36,7 @@ export class UpdateServerConnection extends SocketServer {
         return success;
     }
 
-    public async decodeMessage(buffer: ByteBuffer): Promise<void> {
+    public decodeMessage(buffer: ByteBuffer): void {
         while(buffer.readable >= 4) {
             const requestMethod = buffer.get('byte', 'u'); // 0, 1, 2, 3, or 4
             const indexId = buffer.get('byte', 'u');
@@ -53,10 +53,14 @@ export class UpdateServerConnection extends SocketServer {
                 break;
             }
 
-            const fileRequest: FileRequest = { indexId, fileId };
+            const fileRequest: FileRequest = { archiveIndex: indexId, fileIndex: fileId };
 
             if(requestMethod === 1) {
-                this.sendFile(fileRequest);
+                try {
+                    this.sendFile(fileRequest);
+                } catch(error) {
+                    logger.error(error);
+                }
             } else if(requestMethod === 0) {
                 this.fileRequests.push(fileRequest);
             }
@@ -69,7 +73,7 @@ export class UpdateServerConnection extends SocketServer {
         this.fileRequests = [];
     }
 
-    protected async sendQueuedFiles(): Promise<void> {
+    protected sendQueuedFiles(): void {
         if(!this.fileRequests.length) {
             return;
         }
@@ -77,20 +81,26 @@ export class UpdateServerConnection extends SocketServer {
         const fileRequests = [ ...this.fileRequests ];
         this.fileRequests = [];
 
-        await Promise.all(fileRequests.map(fileRequest => this.sendFile(fileRequest)));
+        for(const fileRequest of fileRequests) {
+            try {
+                this.sendFile(fileRequest);
+            } catch(error) {
+                logger.error(error);
+            }
+        }
     }
 
-    protected async sendFile(fileRequest: FileRequest): Promise<void> {
+    protected sendFile(fileRequest: FileRequest): void {
         if(!this.connectionAlive) {
             return;
         }
 
-        const requestedFile = await this.updateServer.handleFileRequest(fileRequest);
+        const requestedFile = this.updateServer.handleFileRequest(fileRequest);
 
         if(requestedFile) {
             this.socket.write(requestedFile);
         } else {
-            logger.error(`File ${fileRequest.fileId} in archive ${getIndexName(fileRequest.indexId)} is missing.`);
+            throw new Error(`File ${fileRequest.fileIndex} in archive ${getIndexName(fileRequest.archiveIndex)} is missing.`);
             // ^^^ this should have already been logged up the chain, no need to do it again here
             // ^^^ just leaving for reference while testing
             // this.socket.write(this.generateEmptyFile(indexId, fileId));
