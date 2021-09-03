@@ -11,7 +11,7 @@ export default class UpdateServer {
 
     public readonly serverConfig: UpdateServerConfig;
     public fileStore: FileStore;
-    public crcTable: Buffer;
+    public mainIndex: Buffer;
     public indexFiles: Map<number, ByteBuffer> = new Map<number, ByteBuffer>();
 
     private incomingRequests: string[] = [];
@@ -42,10 +42,10 @@ export default class UpdateServer {
         try {
             const start = Date.now();
 
-            this.fileStore = new FileStore('../filestore/stores');
+            this.fileStore = new FileStore('../stores');
 
             logger.info(`Generating main index file...`);
-            this.crcTable = Buffer.from(await this.fileStore.generateCrcTable());
+            this.mainIndex = Buffer.from(await this.fileStore.generateMainIndexFile());
 
             const promises: Promise<void>[] = [];
 
@@ -59,7 +59,7 @@ export default class UpdateServer {
                 logger.info(`Loading files for archive ${name}...`);
 
                 promises.push(archive.unpack(true, false).then(async () => {
-                    logger.info(`${archive.files.size} file(s) loaded.`);
+                    logger.info(`${archive.groups.size} group(s) loaded.`);
                     const indexFile = await archive.generateIndexFile();
                     this.indexFiles.set(index, indexFile);
                     logger.info(`${name} index file length: ${indexFile.length}`);
@@ -78,7 +78,7 @@ export default class UpdateServer {
 
                 logger.info(`Compressing ${name} archive groups...`);
 
-                for(const [ , group ] of archive.files) {
+                for(const [ , group ] of archive.groups) {
                     if(group) {
                         groupPromises.push(group.compress());
                     }
@@ -117,7 +117,7 @@ export default class UpdateServer {
 
         logger.info(`File requested: ${indexName} ${fileIndex}`);
 
-        const indexedFile = indexedArchive.files.get(fileIndex);
+        const indexedFile = indexedArchive.getGroup(fileIndex);
         if(indexedFile) {
             if(!indexedFile.fileDataCompressed) {
                 // await indexedFile.compress();
@@ -180,8 +180,8 @@ export default class UpdateServer {
     }
 
     protected generateCrcTableFile(): Buffer {
-        const crcTableCopy = new ByteBuffer(this.crcTable.length);
-        this.crcTable.copy(crcTableCopy, 0, 0);
+        const crcTableCopy = new ByteBuffer(this.mainIndex.length);
+        this.mainIndex.copy(crcTableCopy, 0, 0);
         const crcFileBuffer = new ByteBuffer(86);
         crcFileBuffer.put(255);
         crcFileBuffer.put(255, 'short');
