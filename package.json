@@ -22,7 +22,7 @@
     "author": "Tynarus",
     "license": "GPL-3.0",
     "dependencies": {
-        "@runejs/core": "^1.5.4",
+        "@runejs/core": "^1.6.0",
         "@runejs/filestore": "file:../filestore",
         "crc-32": "^1.2.0",
         "source-map-support": "^0.5.19",

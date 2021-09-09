@@ -2,17 +2,17 @@ import { FileRequest } from './net/file-request';
 import { UpdateServerConfig } from './config/update-server-config';
 import { parseServerConfig, SocketServer } from '@runejs/core/net';
 import { UpdateServerConnection } from './net/update-server-connection';
-import { FileStore, getIndexName, IndexName } from '../../filestore';
 import { ByteBuffer } from '@runejs/core/buffer';
 import { logger } from '@runejs/core';
+import { FlatFileStore } from '../../filestore';
+import { File, Group } from '@runejs/filestore';
 
 
 export default class UpdateServer {
 
     public readonly serverConfig: UpdateServerConfig;
-    public fileStore: FileStore;
-    public mainIndex: Buffer;
-    public indexFiles: Map<number, ByteBuffer> = new Map<number, ByteBuffer>();
+    public fileStore: FlatFileStore;
+    public mainIndexFile: Buffer;
 
     private incomingRequests: string[] = [];
     private batchLimit: number = 30;
@@ -42,52 +42,15 @@ export default class UpdateServer {
         try {
             const start = Date.now();
 
-            this.fileStore = new FileStore('../stores');
+            this.fileStore = new FlatFileStore({
+                storePath: this.serverConfig.storeDir,
+                configPath: this.serverConfig.configDir,
+                gameVersion: this.serverConfig.clientVersion
+            });
+            
+            this.fileStore.readStore(true);
 
-            logger.info(`Generating main index file...`);
-            this.mainIndex = Buffer.from(await this.fileStore.generateMainIndexFile());
-
-            const promises: Promise<void>[] = [];
-
-            for(const [ index, archive ] of this.fileStore.indexedArchives) {
-                if(!archive) {
-                    continue;
-                }
-
-                const name = archive.archiveName;
-
-                logger.info(`Loading files for archive ${name}...`);
-
-                promises.push(archive.unpack(true, false).then(async () => {
-                    logger.info(`${archive.groups.size} group(s) loaded.`);
-                    const indexFile = await archive.generateIndexFile();
-                    this.indexFiles.set(index, indexFile);
-                    logger.info(`${name} index file length: ${indexFile.length}`);
-                }));
-            }
-
-            await Promise.all(promises);
-
-            for(const [ , archive ] of this.fileStore.indexedArchives) {
-                if(!archive) {
-                    continue;
-                }
-
-                const name = archive.archiveName;
-                const groupPromises: Promise<ByteBuffer>[] = [];
-
-                logger.info(`Compressing ${name} archive groups...`);
-
-                for(const [ , group ] of archive.groups) {
-                    if(group) {
-                        groupPromises.push(group.compress());
-                    }
-                }
-
-                const groupCount = (await Promise.all(groupPromises)).length;
-
-                logger.info(`Compressed ${groupCount} groups.`);
-            }
+            this.mainIndexFile = this.generateMainIndexFile().toNodeBuffer();
 
             const end = Date.now();
             const duration = end - start;
@@ -98,6 +61,23 @@ export default class UpdateServer {
         }
     }
 
+    public generateMainIndexFile(): ByteBuffer {
+        logger.info(`Generating main index file...`);
+        const indexCount = this.fileStore.archives.size - 1; // exclude the main archive 
+        const crcTableFileSize = 78;
+        const buffer = new ByteBuffer(4096);
+
+        buffer.put(0, 'byte'); // compression level (none)
+        buffer.put(crcTableFileSize, 'int'); // file size
+
+        for(let archiveIndex = 0; archiveIndex < indexCount; archiveIndex++) {
+            const archive = this.fileStore.getArchive(String(archiveIndex));
+            buffer.put(archive.crc32, 'int');
+        }
+
+        return buffer;
+    }
+
     public handleFileRequest(fileRequest: FileRequest): Buffer {
         const { archiveIndex, fileIndex } = fileRequest;
 
@@ -105,8 +85,8 @@ export default class UpdateServer {
             return fileIndex === 255 ? this.generateCrcTableFile() : this.generateArchiveIndexFile(fileIndex);
         }
 
-        const indexedArchive = archiveIndex === 255 ? null : this.fileStore.indexedArchives.get(archiveIndex);
-        const indexName: IndexName = getIndexName(archiveIndex);
+        const archive = archiveIndex === 255 ? null : this.fileStore.getArchive(String(archiveIndex));
+        const archiveName = archive.name;
 
         // this.incomingRequests.push(`${indexName} ${fileId}`);
         //
@@ -115,17 +95,17 @@ export default class UpdateServer {
         //     this.incomingRequests = [];
         // }
 
-        logger.info(`File requested: ${indexName} ${fileIndex}`);
+        logger.info(`File requested: ${archiveName} ${fileIndex}`);
 
-        const indexedFile = indexedArchive.getGroup(fileIndex);
-        if(indexedFile) {
-            if(!indexedFile.fileDataCompressed) {
-                // await indexedFile.compress();
+        let file: Group | File = archive.groups.get(String(fileIndex));
+        if(file) {
+            if(!file.compressed) {
+                // file.compress();
             }
-            if(indexedFile.fileData) {
-                const cacheFile = new ByteBuffer(indexedFile.fileData.length);
-                indexedFile.fileData.copy(cacheFile, 0, 0);
-                return this.createFileResponse(fileRequest, cacheFile);
+            if(!file.empty) {
+                const fileDataCopy = new ByteBuffer(file.data.length);
+                file.data.copy(fileDataCopy, 0, 0);
+                return this.createFileResponse(fileRequest, fileDataCopy);
             }
         }
 
@@ -136,10 +116,8 @@ export default class UpdateServer {
     protected createFileResponse(fileRequest: FileRequest, fileDataBuffer: ByteBuffer): Buffer | null {
         const { archiveIndex, fileIndex } = fileRequest;
 
-        const indexName: IndexName = getIndexName(archiveIndex);
-
         if(fileDataBuffer.length < 5) {
-            logger.error(`File ${fileIndex} in index ${indexName} is corrupt.`);
+            logger.error(`File ${fileIndex} in index ${archiveIndex} is corrupt.`);
             return null;
         }
 
@@ -173,15 +151,15 @@ export default class UpdateServer {
     }
 
     protected generateArchiveIndexFile(archiveIndex: number): Buffer {
-        const indexFile = this.indexFiles.get(archiveIndex);
-        const cacheFile = new ByteBuffer(indexFile.length);
-        indexFile.copy(cacheFile, 0, 0);
-        return this.createFileResponse({ archiveIndex: 255, fileIndex: archiveIndex }, indexFile);
+        const indexData = this.fileStore.getArchive(String(archiveIndex));
+        const dataCopy = new ByteBuffer(indexData.data.length);
+        indexData.data.copy(dataCopy, 0, 0);
+        return this.createFileResponse({ archiveIndex: 255, fileIndex: archiveIndex }, indexData.data);
     }
 
     protected generateCrcTableFile(): Buffer {
-        const crcTableCopy = new ByteBuffer(this.mainIndex.length);
-        this.mainIndex.copy(crcTableCopy, 0, 0);
+        const crcTableCopy = new ByteBuffer(this.mainIndexFile.length);
+        this.mainIndexFile.copy(crcTableCopy, 0, 0);
         const crcFileBuffer = new ByteBuffer(86);
         crcFileBuffer.put(255);
         crcFileBuffer.put(255, 'short');

@@ -5,7 +5,6 @@ import { logger } from '@runejs/core';
 
 import UpdateServer from '../update-server';
 import { FileRequest } from './file-request';
-import { getIndexName } from '../../../filestore';
 
 
 export const CONNECTION_ACCEPTED = 0;
@@ -100,7 +99,7 @@ export class UpdateServerConnection extends SocketServer {
         if(requestedFile) {
             this.socket.write(requestedFile);
         } else {
-            throw new Error(`File ${fileRequest.fileIndex} in archive ${getIndexName(fileRequest.archiveIndex)} is missing.`);
+            throw new Error(`File ${fileRequest.fileIndex} in index ${fileRequest.archiveIndex} is missing.`);
             // ^^^ this should have already been logged up the chain, no need to do it again here
             // ^^^ just leaving for reference while testing
             // this.socket.write(this.generateEmptyFile(indexId, fileId));

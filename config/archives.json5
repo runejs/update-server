@@ -1,0 +1,108 @@
+{
+    // The main index of indexes
+    main: {
+        index: 255,
+        compression: 'uncompressed',
+    },
+
+    // Regular indexes
+    anims: {
+        index: 0,
+        compression: 'bzip',
+    },
+    bases: {
+        index: 1,
+        compression: 'gzip',
+    },
+    config: {
+        index: 2,
+        compression: 'bzip',
+        content: {
+            defaultFileNames: {
+                underlays: 1,
+                // 2?
+                identity_kit: 3,
+                overlays: 4,
+                inv: 5,
+                objects: 6,
+                // 7?
+                enums: 8,
+                npcs: 9,
+                items: 10,
+                item_attributes: 11,
+                sequences: 12,
+                spot_anims: 13,
+                varbits: 14,
+                // 15?
+                player_vars: 16,
+                // 17?
+                // 18?
+                // ...?
+            }
+        },
+    },
+    interfaces: {
+        index: 3,
+        compression: 'bzip',
+    },
+    synth_sounds: {
+        index: 4,
+        compression: 'gzip',
+        content: {
+            fileExtension: '.wav',
+        },
+    },
+    maps: {
+        index: 5,
+        compression: 'gzip',
+        encryption: 'xtea',
+        content: {
+            saveFileNames: true,
+        },
+    },
+    midi_songs: {
+        index: 6,
+        compression: 'gzip',
+        content: {
+            fileExtension: '.mid',
+            saveFileNames: true
+        },
+    },
+    models: {
+        index: 7,
+        compression: 'gzip',
+    },
+    sprites: {
+        index: 8,
+        compression: 'gzip',
+        content: {
+            saveFileNames: true
+        },
+    },
+    textures: {
+        index: 9,
+        compression: 'gzip',
+    },
+    binary: {
+        index: 10,
+        compression: 'uncompressed',
+        content: {
+            saveFileNames: true
+        },
+    },
+    midi_jingles: {
+        index: 11,
+        compression: 'gzip',
+        content: {
+            fileExtension: '.mid',
+        },
+    },
+    clientscripts: {
+        index: 12,
+        compression: 'gzip',
+        content: {
+            fileExtension: '.cs2',
+            saveFileNames: true
+        },
+    },
+}
