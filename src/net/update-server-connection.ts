@@ -1,8 +1,7 @@
 import { Socket } from 'net';
-import { ByteBuffer } from '@runejs/core/buffer';
-import { SocketServer } from '@runejs/core/net';
-import { logger } from '@runejs/core';
-
+import { logger } from '@runejs/common';
+import { SocketServer } from '@runejs/common/net';
+import { ByteBuffer } from '@runejs/common/buffer';
 import UpdateServer from '../update-server';
 import { FileRequest } from './file-request';
 

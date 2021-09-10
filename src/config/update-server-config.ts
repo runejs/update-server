@@ -1,4 +1,5 @@
-import { ServerConfigOptions } from '@runejs/core/net';
+import { ServerConfigOptions } from '@runejs/common/net';
+
 
 export interface UpdateServerConfig extends ServerConfigOptions {
     updateServerHost: string;
