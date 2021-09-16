@@ -17,8 +17,8 @@ export default class UpdateServer {
     private incomingRequests: string[] = [];
     private batchLimit: number = 30;
 
-    public constructor(configDir?: string) {
-        this.serverConfig = parseServerConfig<UpdateServerConfig>({ configDir });
+    public constructor() {
+        this.serverConfig = parseServerConfig<UpdateServerConfig>();
 
         if(!this.serverConfig.clientVersion) {
             throw new Error(`Update Server supported client version was not provided. ` +
@@ -26,8 +26,8 @@ export default class UpdateServer {
         }
     }
 
-    public static async launch(configDir?: string): Promise<UpdateServer> {
-        const updateServer = new UpdateServer(configDir);
+    public static async launch(): Promise<UpdateServer> {
+        const updateServer = new UpdateServer();
 
         await updateServer.loadFileStore();
 
@@ -44,7 +44,6 @@ export default class UpdateServer {
 
             this.fileStore = new FlatFileStore({
                 storePath: this.serverConfig.storeDir,
-                configPath: this.serverConfig.configDir,
                 gameVersion: this.serverConfig.clientVersion
             });
             

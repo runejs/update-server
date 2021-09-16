@@ -9,6 +9,6 @@ export interface UpdateServerConfig extends ServerConfigOptions {
 }
 
 export const defaultConfig: Partial<UpdateServerConfig> = {
-    storeDir: '../filestore/stores',
+    storeDir: '../store',
     clientVersion: 435
 };
