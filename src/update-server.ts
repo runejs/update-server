@@ -1,165 +1,179 @@
-import { logger } from '@runejs/core';
-import { ByteBuffer } from '@runejs/core/buffer';
-import { parseServerConfig, SocketServer } from '@runejs/core/net';
-import { Filestore, readIndexedDataChunk } from '@runejs/filestore';
-import { Socket } from 'net';
-import * as CRC32 from 'crc-32';
+import { logger } from '@runejs/common';
+import { File, Group } from '@runejs/filestore';
+import { ByteBuffer } from '@runejs/common/buffer';
+import { parseServerConfig, SocketServer } from '@runejs/common/net';
+import { FlatFileStore } from '../../filestore';
+import { FileRequest } from './net/file-request';
+import { UpdateServerConfig } from './config/update-server-config';
+import { UpdateServerConnection } from './net/update-server-connection';
 
 
-interface ServerConfig {
-    updateServerHost: string;
-    updateServerPort: number;
-    cacheDir: string;
-    configDir?: string;
-}
+export default class UpdateServer {
 
-enum ConnectionStage {
-    HANDSHAKE = 'handshake',
-    ACTIVE = 'active'
-}
+    public readonly serverConfig: UpdateServerConfig;
+    public fileStore: FlatFileStore;
+    public mainIndexFile: Buffer;
 
-class UpdateServerConnection extends SocketServer {
+    private incomingRequests: string[] = [];
+    private batchLimit: number = 30;
 
-    private connectionStage: ConnectionStage = ConnectionStage.HANDSHAKE;
-    private files: { file: number, index: number }[] = [];
+    public constructor() {
+        this.serverConfig = parseServerConfig<UpdateServerConfig>();
 
-    public constructor(private readonly updateServer: UpdateServer,
-                       gameServerSocket: Socket) {
-        super(gameServerSocket);
-    }
-
-    public initialHandshake(buffer: ByteBuffer): boolean {
-        const gameVersion = buffer.get('INT');
-        const outputBuffer = new ByteBuffer(1);
-
-        if(gameVersion === 435) {
-            outputBuffer.put(0); // good to go!
-            this.connectionStage = ConnectionStage.ACTIVE;
-            this.socket.write(outputBuffer);
-            return true;
-        } else {
-            outputBuffer.put(6); // out of date
-            this.socket.write(outputBuffer);
-            return false;
+        if(!this.serverConfig.clientVersion) {
+            throw new Error(`Update Server supported client version was not provided. ` +
+                `Please add clientVersion to your configuration file.`);
         }
     }
 
+    public static async launch(): Promise<UpdateServer> {
+        const updateServer = new UpdateServer();
 
-    public decodeMessage(buffer: ByteBuffer): void {
-        while(buffer.readable >= 4) {
-            const type = buffer.get('byte', 'u');
-            const index = buffer.get('byte', 'u');
-            const file = buffer.get('short', 'u');
+        await updateServer.loadFileStore();
 
-            switch(type) {
-                case 0: // queue
-                    this.files.push({ index, file });
-                    break;
-                case 1: // immediate
-                    this.socket.write(this.generateFile(index, file));
-                    break;
-                case 2:
-                case 3: // clear queue
-                    this.files = [];
-                    break;
-                case 4: // error
-                    break;
-            }
+        SocketServer.launch<UpdateServerConnection>('Update Server',
+            updateServer.serverConfig.updateServerHost, updateServer.serverConfig.updateServerPort,
+            socket => new UpdateServerConnection(updateServer, socket));
 
-            while(this.files.length > 0) {
-                const info = this.files.shift();
-                this.socket.write(this.generateFile(info.index, info.file));
-            }
-        }
+        return updateServer;
     }
 
-    public connectionDestroyed(): void {
-    }
-
-    private generateFile(index: number, file: number): Buffer {
-        let cacheFile: ByteBuffer;
-
+    public async loadFileStore(): Promise<void> {
         try {
-            if(index === 255 && file === 255) {
-                cacheFile = new ByteBuffer(this.updateServer.crcTable.length);
-                this.updateServer.crcTable.copy(cacheFile, 0, 0);
-            } else {
-                cacheFile = readIndexedDataChunk(file, index, this.updateServer.filestore.channels).dataFile;
-            }
-        } catch(error) {
-            logger.warn(`Unable to load filestore file for update server request`, index, file);
+            const start = Date.now();
+
+            this.fileStore = new FlatFileStore({
+                storePath: this.serverConfig.storeDir,
+                gameVersion: this.serverConfig.clientVersion
+            });
+            
+            this.fileStore.readStore(true);
+
+            this.mainIndexFile = this.generateMainIndexFile().toNodeBuffer();
+
+            const end = Date.now();
+            const duration = end - start;
+
+            logger.info(`File Store loaded in ${duration / 1000} seconds.`);
+        } catch(e) {
+            logger.error(e);
         }
-
-        if(!cacheFile || cacheFile.length === 0) {
-            throw new Error(`Cache file not found; file(${file}) with index(${index}).`);
-        }
-
-        const buffer = new ByteBuffer((cacheFile.length - 2) + ((cacheFile.length - 2) / 511) + 8);
-        buffer.put(index, 'BYTE');
-        buffer.put(file, 'SHORT');
-
-        let length: number = ((cacheFile.at(1, 'UNSIGNED') << 24) + (cacheFile.at(2, 'UNSIGNED') << 16) +
-            (cacheFile.at(3, 'UNSIGNED') << 8) + cacheFile.at(4, 'UNSIGNED')) + 9;
-        if(cacheFile.at(0) === 0) {
-            length -= 4;
-        }
-
-        let c = 3;
-        for(let i = 0; i < length; i++) {
-            if(c === 512) {
-                buffer.put(255, 'BYTE');
-                c = 1;
-            }
-
-            buffer.put(cacheFile.at(i), 'BYTE');
-            c++;
-        }
-
-        return Buffer.from(buffer.flipWriter());
     }
 
-}
+    public generateMainIndexFile(): ByteBuffer {
+        logger.info(`Generating main index file...`);
+        const indexCount = this.fileStore.archives.size - 1; // exclude the main archive 
+        const crcTableFileSize = 78;
+        const buffer = new ByteBuffer(4096);
 
+        buffer.put(0, 'byte'); // compression level (none)
+        buffer.put(crcTableFileSize, 'int'); // file size
 
-class UpdateServer {
-
-    public readonly serverConfig: ServerConfig;
-    public readonly filestore: Filestore;
-    public readonly crcTable: ByteBuffer;
-
-    public constructor(configDir?: string) {
-        this.serverConfig = parseServerConfig<ServerConfig>({ configDir });
-
-        this.filestore = new Filestore(this.serverConfig.cacheDir, {
-            configDir: this.serverConfig.configDir || this.serverConfig.cacheDir,
-            xteas: {}
-        });
-        this.crcTable = this.generateCrcTable();
-    }
-
-    private generateCrcTable(): ByteBuffer {
-        const index = this.filestore.channels.metaChannel;
-        const indexLength = index.length;
-        const buffer = new ByteBuffer(4048);
-        buffer.put(0, 'byte');
-        buffer.put(indexLength, 'int');
-        for(let file = 0; file < (indexLength / 6); file++) {
-            const crcValue = CRC32.buf(readIndexedDataChunk(file, 255, this.filestore.channels)?.dataFile);
-            buffer.put(crcValue, 'int');
+        for(let archiveIndex = 0; archiveIndex < indexCount; archiveIndex++) {
+            const archive = this.fileStore.getArchive(String(archiveIndex));
+            buffer.put(archive.crc32, 'int');
         }
 
         return buffer;
     }
 
+    public handleFileRequest(fileRequest: FileRequest): Buffer {
+        const { archiveIndex, fileIndex } = fileRequest;
+
+        if(archiveIndex === 255) {
+            return fileIndex === 255 ? this.generateCrcTableFile() : this.generateArchiveIndexFile(fileIndex);
+        }
+
+        const archive = archiveIndex === 255 ? null : this.fileStore.getArchive(String(archiveIndex));
+        const archiveName = archive.name;
+
+        // this.incomingRequests.push(`${indexName} ${fileId}`);
+        //
+        // if(this.incomingRequests.length >= this.batchLimit) {
+        //     logger.info(`${this.batchLimit} files requested: ${this.incomingRequests.join(', ')}`);
+        //     this.incomingRequests = [];
+        // }
+
+        logger.info(`File requested: ${archiveName} ${fileIndex}`);
+
+        let file: Group | File = archive.groups.get(String(fileIndex));
+        if(file) {
+            if(!file.compressed) {
+                // file.compress();
+            }
+            if(!file.empty) {
+                const fileDataCopy = new ByteBuffer(file.data.length);
+                file.data.copy(fileDataCopy, 0, 0);
+                return this.createFileResponse(fileRequest, fileDataCopy);
+            }
+        }
+
+        // logger.error(`File ${fileIndex} in index ${indexName} is empty.`);
+        return null;
+    }
+
+    protected createFileResponse(fileRequest: FileRequest, fileDataBuffer: ByteBuffer): Buffer | null {
+        const { archiveIndex, fileIndex } = fileRequest;
+
+        if(fileDataBuffer.length < 5) {
+            logger.error(`File ${fileIndex} in index ${archiveIndex} is corrupt.`);
+            return null;
+        }
+
+        const compression: number = fileDataBuffer.get('byte', 'unsigned');
+        const length: number = fileDataBuffer.get('int', 'unsigned') + (compression === 0 ? 5 : 9);
+
+        let buffer: ByteBuffer;
+
+        try {
+            buffer = new ByteBuffer((length - 2) + ((length - 2) / 511) + 8);
+        } catch(error) {
+            logger.error(`Invalid file length of ${length} detected.`);
+            return null;
+        }
+
+        buffer.put(archiveIndex);
+        buffer.put(fileIndex, 'short');
+
+        let s = 3;
+        for(let i = 0; i < length; i++) {
+            if(s === 512) {
+                buffer.put(255);
+                s = 1;
+            }
+
+            buffer.put(fileDataBuffer.at(i));
+            s++;
+        }
+
+        return Buffer.from(buffer.flipWriter());
+    }
+
+    protected generateArchiveIndexFile(archiveIndex: number): Buffer {
+        const indexData = this.fileStore.getArchive(String(archiveIndex));
+        const dataCopy = new ByteBuffer(indexData.data.length);
+        indexData.data.copy(dataCopy, 0, 0);
+        return this.createFileResponse({ archiveIndex: 255, fileIndex: archiveIndex }, indexData.data);
+    }
+
+    protected generateCrcTableFile(): Buffer {
+        const crcTableCopy = new ByteBuffer(this.mainIndexFile.length);
+        this.mainIndexFile.copy(crcTableCopy, 0, 0);
+        const crcFileBuffer = new ByteBuffer(86);
+        crcFileBuffer.put(255);
+        crcFileBuffer.put(255, 'short');
+        crcFileBuffer.putBytes(crcTableCopy, 0, 83);
+        return Buffer.from(crcFileBuffer);
+    }
+
+    protected generateEmptyFile(index: number, file: number): Buffer {
+        const buffer = new ByteBuffer(9);
+        buffer.put(index);
+        buffer.put(file, 'short');
+        buffer.put(0); // compression
+        buffer.put(1, 'int'); // file length
+        buffer.put(0); // single byte of data
+        return Buffer.from(buffer);
+    }
+
 }
-
-
-export const launchUpdateServer = (configDir?: string) => {
-    const updateServer = new UpdateServer(configDir);
-    const { updateServerHost, updateServerPort } = updateServer.serverConfig;
-    SocketServer.launch<UpdateServerConnection>(
-        'Update Server',
-        updateServerHost, updateServerPort,
-        socket => new UpdateServerConnection(updateServer, socket)
-    );
-};
