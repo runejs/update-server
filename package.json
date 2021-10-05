@@ -22,9 +22,9 @@
     "author": "Tynarus",
     "license": "GPL-3.0",
     "dependencies": {
-        "@runejs/common": "2.0.0-rc.1",
+        "@runejs/common": "2.0.0-rc.2",
         "@runejs/filestore": "file:../filestore",
-        "crc-32": "^1.2.0",
+        "@runejs/js5": "^1.0.0-next.2",
         "source-map-support": "^0.5.19",
         "tslib": "^2.2.0"
     },

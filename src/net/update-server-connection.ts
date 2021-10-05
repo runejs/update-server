@@ -22,6 +22,7 @@ export class UpdateServerConnection extends SocketServer {
     }
 
     public initialHandshake(buffer: ByteBuffer): boolean {
+        logger.info(`initialHandshake, readable = ${buffer.readable}`);
         const clientVersion: number = buffer.get('int');
         const supportedVersion: number = this.updateServer.serverConfig.clientVersion;
 
@@ -54,11 +55,7 @@ export class UpdateServerConnection extends SocketServer {
             const fileRequest: FileRequest = { archiveIndex: indexId, fileIndex: fileId };
 
             if(requestMethod === 1) {
-                try {
-                    this.sendFile(fileRequest);
-                } catch(error) {
-                    logger.error(error);
-                }
+                this.sendFile(fileRequest);
             } else if(requestMethod === 0) {
                 this.fileRequests.push(fileRequest);
             }
@@ -80,11 +77,7 @@ export class UpdateServerConnection extends SocketServer {
         this.fileRequests = [];
 
         for(const fileRequest of fileRequests) {
-            try {
-                this.sendFile(fileRequest);
-            } catch(error) {
-                logger.error(error);
-            }
+            this.sendFile(fileRequest);
         }
     }
 
@@ -96,12 +89,12 @@ export class UpdateServerConnection extends SocketServer {
         const requestedFile = this.updateServer.handleFileRequest(fileRequest);
 
         if(requestedFile) {
+            if(this.socket && !this.socket.destroyed)
             this.socket.write(requestedFile);
         } else {
-            throw new Error(`File ${fileRequest.fileIndex} in index ${fileRequest.archiveIndex} is missing.`);
+            logger.error(`File ${fileRequest.fileIndex} in index ${fileRequest.archiveIndex} is missing.`);
             // ^^^ this should have already been logged up the chain, no need to do it again here
             // ^^^ just leaving for reference while testing
-            // this.socket.write(this.generateEmptyFile(indexId, fileId));
         }
     }
 
