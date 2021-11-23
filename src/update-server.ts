@@ -51,32 +51,6 @@ export class UpdateServer {
             this.fileStore.readStore(true);
 
             for(const [ , archive ] of this.fileStore.archives) {
-                // if(!archive?.index || archive.index === '255') {
-                //     continue;
-                // }
-                //
-                // const name = archive.name;
-                // const groupPromises: Promise<void>[] = [];
-                //
-                // logger.info(`Compressing groups for archive ${name}...`);
-                //
-                // for(const [ , group ] of archive.groups) {
-                //     if(group) {
-                //         groupPromises.push(new Promise<void>(resolve => {
-                //             group.compress();
-                //             resolve();
-                //         }));
-                //     }
-                // }
-                //
-                // const groupCount = (await Promise.all(groupPromises)).length;
-                //
-                // logger.info(`Compressed ${groupCount} groups.`);
-
-                // logger.info(`Compressing index file...`);
-
-                // await archive.generateJs5Index(true);
-
                 const originalCrc = archive.crc32;
                 archive.generateCrc32();
 
@@ -109,53 +83,14 @@ export class UpdateServer {
 
         const archive = archiveIndex === 255 ? null : this.fileStore.getArchive(String(archiveIndex));
 
-        // logger.info(`File requested: ${archive.name} ${fileIndex}`);
-
         const file: Group | File = archive.groups.get(String(fileIndex));
 
-        // if(file && !file.empty) {
         if(file?.data) {
             return this.createFileResponse(fileRequest, archive, file);
-            // return file.wrap();
         } else {
             logger.error(`File ${fileIndex} in archive ${archive.name} is empty.`);
-            // return this.generateEmptyFile(fileRequest, file);
             return null;
-            // return this.generateEmptyFile(fileRequest,
-            //     file.archive.config.versioned ? file.version ?? 0 : undefined)
         }
-    }
-
-    protected generateEmptyFile(fileRequest: FileRequest, file: Group | File): Buffer {
-        const buffer = new ByteBuffer(file.archive.details.versioned ? 10 : 8);
-        buffer.put(fileRequest.archiveIndex);
-        buffer.put(fileRequest.fileIndex, 'short');
-        buffer.put(0); // compression
-        buffer.put(0, 'int'); // file length
-        // buffer.put(0); // junk
-
-        if(file.archive.details.versioned) {
-            buffer.put(0, 'short');
-        }
-
-        return buffer.toNodeBuffer();
-    }
-
-    protected versionFileData(file: Group): ByteBuffer {
-        if(!file.archive.details.versioned) {
-            return file.data;
-        }
-
-        const size = file.data.length + 2;
-        const fileDataCopy = new ByteBuffer(size);
-        file.data.copy(fileDataCopy, 0, 0);
-
-        if(file.archive.details.versioned) {
-            fileDataCopy.writerIndex = fileDataCopy.length - 2;
-            fileDataCopy.put(file.version ?? 1, 'short');
-        }
-
-        return fileDataCopy.flipWriter();
     }
 
     protected createFileResponse(fileRequest: FileRequest,
