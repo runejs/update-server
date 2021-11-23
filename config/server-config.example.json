@@ -1,6 +1,6 @@
 {
     "updateServerHost": "0.0.0.0",
     "updateServerPort": 43592,
-    "storeDir": "../store",
-    "clientVersion": 435
+    "storePath": "../store",
+    "gameVersion": 435
 }

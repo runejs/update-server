@@ -6,7 +6,7 @@
     "types": "lib/index.d.ts",
     "scripts": {
         "build": "rimraf lib && tsc",
-        "start": "ts-node-dev --max-old-space-size=1024 --respawn src/main.ts",
+        "start": "ts-node-dev --max-old-space-size=2048 --respawn src/main.ts",
         "lint": "eslint --ext .ts src",
         "lint:fix": "eslint --ext .ts src --fix",
         "package": "rimraf lib && npm i && npm run build && npm publish --dry-run"
@@ -22,22 +22,22 @@
     "author": "Tynarus",
     "license": "GPL-3.0",
     "dependencies": {
-        "@runejs/common": "2.0.0-rc.2",
-        "@runejs/filestore": "file:../filestore",
-        "@runejs/js5": "^1.0.0-next.2",
+        "@runejs/common": "2.0.0-rc.9",
+        "@runejs/filestore": "file:../filestore/lib",
+        "graceful-fs": "^4.2.8",
         "source-map-support": "^0.5.19",
-        "tslib": "^2.2.0"
+        "tslib": "^2.3.1"
     },
     "devDependencies": {
         "@runejs/eslint-config": "^1.0.0",
-        "@types/node": "^14.14.37",
+        "@types/node": "^16.10.5",
         "@typescript-eslint/eslint-plugin": "^4.29.3",
         "@typescript-eslint/parser": "^4.29.3",
         "eslint": "^7.32.0",
         "rimraf": "^3.0.2",
-        "ts-node": "^9.1.1",
+        "ts-node": "^10.3.0",
         "ts-node-dev": "^1.1.8",
-        "typescript": "^4.2.4"
+        "typescript": "^4.4.4"
     },
     "eslintConfig": {
         "extends": [
