@@ -48,27 +48,60 @@ export class UpdateServer {
 
             StoreConfig.register(this.serverConfig.storePath, this.serverConfig.gameVersion);
             StoreConfig.loadArchiveConfig();
-            this.fileStore.readStore(true);
+
+            const fileReadStart = Date.now();
+
+            this.fileStore.readStore(false);
+
+            const fileReadEnd = Date.now();
+            const fileReadDuration = fileReadEnd - fileReadStart;
+
+            logger.info(`Store file read completed in ${fileReadDuration / 1000} seconds.`);
 
             for(const [ , archive ] of this.fileStore.archives) {
+                const compressionStart = Date.now();
+                logger.info(`Compressing archive ${archive.name}...`);
+
+                let changeCount = 0;
+
+                for(const [ , group ] of archive.groups) {
+                    const groupOriginalCrc = group.crc32;
+
+                    group.compress();
+                    group.generateCrc32();
+
+                    if(groupOriginalCrc !== group.crc32) {
+                        // logger.warn(`Group ${group.name ?? group.index} checksum has changed from ${groupOriginalCrc} to ${group.crc32}.`);
+                        changeCount++;
+                    }
+                }
+
+                if(changeCount) {
+                    logger.warn(changeCount === 1 ? `1 file change was detected.` : `${changeCount} file changes were detected.`);
+                }
+
                 const originalCrc = archive.crc32;
+                archive.compress();
                 archive.generateCrc32();
 
                 if(originalCrc !== archive.crc32) {
                     logger.warn(`Archive ${archive.name} checksum has changed from ${originalCrc} to ${archive.crc32}.`);
                     archive.indexData.crc32 = archive.crc32;
                 }
+
+                const compressionEnd = Date.now();
+                const compressionDuration = compressionEnd - compressionStart;
+
+                logger.info(`Archive ${archive.name} was compressed in ${compressionDuration / 1000} seconds.`);
             }
 
-            // this.fileStore.buildMainIndex();
+            this.fileStore.buildMainIndex(); // Only if compress = false on the readStore(compress) call
             this.mainIndexFile = this.fileStore.mainIndexData.toNodeBuffer();
 
             const end = Date.now();
             const duration = end - start;
 
-            logger.info(`Archives loaded: ` +
-                Array.from(this.fileStore.archives.values()).map(a => a.name).join(', '),
-                `Files read and compressed in ${duration / 1000} seconds.`);
+            logger.info(`Archives loaded and compressed in ${duration / 1000} seconds.`);
         } catch(e) {
             logger.error(e);
         }
@@ -87,6 +120,7 @@ export class UpdateServer {
 
         if(file?.data) {
             return this.createFileResponse(fileRequest, archive, file);
+            // return file.wrap(); // @TODO lol still broken
         } else {
             logger.error(`File ${fileIndex} in archive ${archive.name} is empty.`);
             return null;

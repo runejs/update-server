@@ -23,7 +23,7 @@
     "license": "GPL-3.0",
     "dependencies": {
         "@runejs/common": "2.0.0-rc.9",
-        "@runejs/filestore": "1.0.0-beta.12",
+        "@runejs/filestore": "file:../filestore/lib",
         "graceful-fs": "^4.2.8",
         "source-map-support": "^0.5.19",
         "tslib": "^2.3.1"
