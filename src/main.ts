@@ -1,6 +1,7 @@
-import { logger } from '@runejs/common';
-import UpdateServer from './update-server';
 import 'source-map-support/register';
+
+import { logger } from '@runejs/common';
+import { UpdateServer } from './update-server';
 
 
 UpdateServer.launch()

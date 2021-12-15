@@ -2,7 +2,7 @@ import { Socket } from 'net';
 import { logger } from '@runejs/common';
 import { SocketServer } from '@runejs/common/net';
 import { ByteBuffer } from '@runejs/common/buffer';
-import UpdateServer from '../update-server';
+import { UpdateServer } from '../update-server';
 import { FileRequest } from './file-request';
 
 
@@ -22,8 +22,9 @@ export class UpdateServerConnection extends SocketServer {
     }
 
     public initialHandshake(buffer: ByteBuffer): boolean {
+        logger.info(`initialHandshake, readable = ${buffer.readable}`);
         const clientVersion: number = buffer.get('int');
-        const supportedVersion: number = this.updateServer.serverConfig.clientVersion;
+        const supportedVersion: number = this.updateServer.serverConfig.gameVersion;
 
         const responseCode: number = clientVersion === supportedVersion ? CONNECTION_ACCEPTED : UNSUPPORTED_CLIENT_VERSION;
         const success: boolean = responseCode === CONNECTION_ACCEPTED;
@@ -37,8 +38,8 @@ export class UpdateServerConnection extends SocketServer {
     public decodeMessage(buffer: ByteBuffer): void {
         while(buffer.readable >= 4) {
             const requestMethod = buffer.get('byte', 'u'); // 0, 1, 2, 3, or 4
-            const indexId = buffer.get('byte', 'u');
-            const fileId = buffer.get('short', 'u');
+            const archiveIndex = buffer.get('byte', 'u');
+            const fileIndex = buffer.get('short', 'u');
 
             if(requestMethod >= 4) {
                 // error
@@ -51,7 +52,9 @@ export class UpdateServerConnection extends SocketServer {
                 break;
             }
 
-            const fileRequest: FileRequest = { archiveIndex: indexId, fileIndex: fileId };
+            const fileRequest: FileRequest = {
+                archiveIndex, fileIndex,
+                archiveName: this.updateServer.fileStore.getArchive(String(archiveIndex)).name };
 
             if(requestMethod === 1) {
                 try {
@@ -95,13 +98,14 @@ export class UpdateServerConnection extends SocketServer {
 
         const requestedFile = this.updateServer.handleFileRequest(fileRequest);
 
-        if(requestedFile) {
-            this.socket.write(requestedFile);
-        } else {
-            throw new Error(`File ${fileRequest.fileIndex} in index ${fileRequest.archiveIndex} is missing.`);
-            // ^^^ this should have already been logged up the chain, no need to do it again here
-            // ^^^ just leaving for reference while testing
-            // this.socket.write(this.generateEmptyFile(indexId, fileId));
+        if(this.socket && !this.socket.destroyed && this.socket.writable) {
+            if(requestedFile) {
+                this.socket.write(requestedFile);
+            } else {
+                logger.error(`Unable to find file ${fileRequest.fileIndex} in archive ${fileRequest.archiveName}.`);
+                // this.socket.write(this.generateEmptyFile(fileRequest,
+                //     StoreConfig.archives.get(String(fileRequest.archiveIndex)).versioned ? 0 : undefined));
+            }
         }
     }
 

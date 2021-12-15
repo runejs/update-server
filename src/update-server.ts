@@ -1,26 +1,23 @@
 import { logger } from '@runejs/common';
-import { File, Group } from '@runejs/filestore';
 import { ByteBuffer } from '@runejs/common/buffer';
 import { parseServerConfig, SocketServer } from '@runejs/common/net';
-import { FlatFileStore } from '../../filestore';
+import { Archive, File, Group, IndexedFile, FlatFileStore } from '@runejs/filestore/flat-file-store';
+import { StoreConfig } from '@runejs/filestore/config';
 import { FileRequest } from './net/file-request';
 import { UpdateServerConfig } from './config/update-server-config';
 import { UpdateServerConnection } from './net/update-server-connection';
 
 
-export default class UpdateServer {
+export class UpdateServer {
 
     public readonly serverConfig: UpdateServerConfig;
     public fileStore: FlatFileStore;
     public mainIndexFile: Buffer;
 
-    private incomingRequests: string[] = [];
-    private batchLimit: number = 30;
-
     public constructor() {
         this.serverConfig = parseServerConfig<UpdateServerConfig>();
 
-        if(!this.serverConfig.clientVersion) {
+        if(!this.serverConfig.gameVersion) {
             throw new Error(`Update Server supported client version was not provided. ` +
                 `Please add clientVersion to your configuration file.`);
         }
@@ -43,120 +40,137 @@ export default class UpdateServer {
             const start = Date.now();
 
             this.fileStore = new FlatFileStore({
-                storePath: this.serverConfig.storeDir,
-                gameVersion: this.serverConfig.clientVersion
+                storePath: this.serverConfig.storePath,
+                gameVersion: this.serverConfig.gameVersion
             });
-            
-            this.fileStore.readStore(true);
 
-            this.mainIndexFile = this.generateMainIndexFile().toNodeBuffer();
+            logger.info(`Reading store archives...`);
+
+            StoreConfig.register(this.serverConfig.storePath, this.serverConfig.gameVersion);
+            StoreConfig.loadArchiveConfig();
+
+            const fileReadStart = Date.now();
+
+            this.fileStore.readStore(false);
+
+            const fileReadEnd = Date.now();
+            const fileReadDuration = fileReadEnd - fileReadStart;
+
+            logger.info(`Store file read completed in ${fileReadDuration / 1000} seconds.`);
+
+            for(const [ , archive ] of this.fileStore.archives) {
+                const compressionStart = Date.now();
+                logger.info(`Compressing archive ${archive.name}...`);
+
+                let changeCount = 0;
+
+                for(const [ , group ] of archive.groups) {
+                    const groupOriginalCrc = group.crc32;
+
+                    group.compress();
+                    group.generateCrc32();
+
+                    if(groupOriginalCrc !== group.crc32) {
+                        // logger.warn(`Group ${group.name ?? group.index} checksum has changed from ${groupOriginalCrc} to ${group.crc32}.`);
+                        changeCount++;
+                    }
+                }
+
+                if(changeCount) {
+                    logger.warn(changeCount === 1 ? `1 file change was detected.` : `${changeCount} file changes were detected.`);
+                }
+
+                const originalCrc = archive.crc32;
+                archive.compress();
+                archive.generateCrc32();
+
+                if(originalCrc !== archive.crc32) {
+                    logger.warn(`Archive ${archive.name} checksum has changed from ${originalCrc} to ${archive.crc32}.`);
+                    archive.indexData.crc32 = archive.crc32;
+                }
+
+                const compressionEnd = Date.now();
+                const compressionDuration = compressionEnd - compressionStart;
+
+                logger.info(`Archive ${archive.name} was compressed in ${compressionDuration / 1000} seconds.`);
+            }
+
+            this.fileStore.buildMainIndex(); // Only if compress = false on the readStore(compress) call
+            this.mainIndexFile = this.fileStore.mainIndexData.toNodeBuffer();
 
             const end = Date.now();
             const duration = end - start;
 
-            logger.info(`File Store loaded in ${duration / 1000} seconds.`);
+            logger.info(`Archives loaded and compressed in ${duration / 1000} seconds.`);
         } catch(e) {
             logger.error(e);
         }
     }
 
-    public generateMainIndexFile(): ByteBuffer {
-        logger.info(`Generating main index file...`);
-        const indexCount = this.fileStore.archives.size - 1; // exclude the main archive 
-        const crcTableFileSize = 78;
-        const buffer = new ByteBuffer(4096);
-
-        buffer.put(0, 'byte'); // compression level (none)
-        buffer.put(crcTableFileSize, 'int'); // file size
-
-        for(let archiveIndex = 0; archiveIndex < indexCount; archiveIndex++) {
-            const archive = this.fileStore.getArchive(String(archiveIndex));
-            buffer.put(archive.crc32, 'int');
-        }
-
-        return buffer;
-    }
-
-    public handleFileRequest(fileRequest: FileRequest): Buffer {
+    public handleFileRequest(fileRequest: FileRequest): Buffer | null {
         const { archiveIndex, fileIndex } = fileRequest;
 
         if(archiveIndex === 255) {
-            return fileIndex === 255 ? this.generateCrcTableFile() : this.generateArchiveIndexFile(fileIndex);
+            return fileIndex === 255 ? this.wrapMainIndexFile() : this.generateArchiveIndexFile(fileIndex);
         }
 
         const archive = archiveIndex === 255 ? null : this.fileStore.getArchive(String(archiveIndex));
-        const archiveName = archive.name;
 
-        // this.incomingRequests.push(`${indexName} ${fileId}`);
-        //
-        // if(this.incomingRequests.length >= this.batchLimit) {
-        //     logger.info(`${this.batchLimit} files requested: ${this.incomingRequests.join(', ')}`);
-        //     this.incomingRequests = [];
-        // }
+        const file: Group | File = archive.groups.get(String(fileIndex));
 
-        logger.info(`File requested: ${archiveName} ${fileIndex}`);
-
-        let file: Group | File = archive.groups.get(String(fileIndex));
-        if(file) {
-            if(!file.compressed) {
-                // file.compress();
-            }
-            if(!file.empty) {
-                const fileDataCopy = new ByteBuffer(file.data.length);
-                file.data.copy(fileDataCopy, 0, 0);
-                return this.createFileResponse(fileRequest, fileDataCopy);
-            }
+        if(file?.data) {
+            return this.createFileResponse(fileRequest, archive, file);
+            // return file.wrap(); // @TODO lol still broken
+        } else {
+            logger.error(`File ${fileIndex} in archive ${archive.name} is empty.`);
+            return null;
         }
-
-        // logger.error(`File ${fileIndex} in index ${indexName} is empty.`);
-        return null;
     }
 
-    protected createFileResponse(fileRequest: FileRequest, fileDataBuffer: ByteBuffer): Buffer | null {
+    protected createFileResponse(fileRequest: FileRequest,
+                                 archive: Archive,
+                                 file: IndexedFile<any>): Buffer | null {
+        if((file?.data?.length ?? 0) < 5) {
+            logger.error(`File ${fileRequest.fileIndex} in archive ${archive.name} is corrupt.`);
+            return null;
+        }
+
         const { archiveIndex, fileIndex } = fileRequest;
 
-        if(fileDataBuffer.length < 5) {
-            logger.error(`File ${fileIndex} in index ${archiveIndex} is corrupt.`);
-            return null;
-        }
+        file.data.readerIndex = 0;
 
-        const compression: number = fileDataBuffer.get('byte', 'unsigned');
-        const length: number = fileDataBuffer.get('int', 'unsigned') + (compression === 0 ? 5 : 9);
+        const fileCompression: number = file.data.get('byte');
+        const fileSize: number = file.data.get('int', 'unsigned') + (fileCompression === 0 ? 5 : 9);
 
-        let buffer: ByteBuffer;
+        const responsePacket = new ByteBuffer((fileSize - 2) + ((fileSize - 2) / 511) + 8);
 
-        try {
-            buffer = new ByteBuffer((length - 2) + ((length - 2) / 511) + 8);
-        } catch(error) {
-            logger.error(`Invalid file length of ${length} detected.`);
-            return null;
-        }
-
-        buffer.put(archiveIndex);
-        buffer.put(fileIndex, 'short');
+        responsePacket.put(archiveIndex);
+        responsePacket.put(fileIndex, 'short');
 
         let s = 3;
-        for(let i = 0; i < length; i++) {
+        for(let i = 0; i < fileSize; i++) {
             if(s === 512) {
-                buffer.put(255);
+                responsePacket.put(255);
                 s = 1;
             }
 
-            buffer.put(fileDataBuffer.at(i));
+            responsePacket.put(file.data.at(i));
             s++;
         }
 
-        return Buffer.from(buffer.flipWriter());
+        return responsePacket.flipWriter().toNodeBuffer();
     }
 
     protected generateArchiveIndexFile(archiveIndex: number): Buffer {
         const indexData = this.fileStore.getArchive(String(archiveIndex));
-        const dataCopy = new ByteBuffer(indexData.data.length);
-        indexData.data.copy(dataCopy, 0, 0);
-        return this.createFileResponse({ archiveIndex: 255, fileIndex: archiveIndex }, indexData.data);
+        return this.createFileResponse({
+            archiveIndex: 255,
+            archiveName: 'main',
+            fileIndex: archiveIndex
+        }, this.fileStore.getArchive('255'), indexData);
     }
 
-    protected generateCrcTableFile(): Buffer {
+    protected wrapMainIndexFile(): Buffer {
         const crcTableCopy = new ByteBuffer(this.mainIndexFile.length);
         this.mainIndexFile.copy(crcTableCopy, 0, 0);
         const crcFileBuffer = new ByteBuffer(86);
@@ -164,16 +178,6 @@ export default class UpdateServer {
         crcFileBuffer.put(255, 'short');
         crcFileBuffer.putBytes(crcTableCopy, 0, 83);
         return Buffer.from(crcFileBuffer);
-    }
-
-    protected generateEmptyFile(index: number, file: number): Buffer {
-        const buffer = new ByteBuffer(9);
-        buffer.put(index);
-        buffer.put(file, 'short');
-        buffer.put(0); // compression
-        buffer.put(1, 'int'); // file length
-        buffer.put(0); // single byte of data
-        return Buffer.from(buffer);
     }
 
 }
