@@ -30,9 +30,11 @@ export class UpdateServerConnection extends SocketServer {
         const success: boolean = responseCode === CONNECTION_ACCEPTED;
 
         // send the handshake response to the client
-        this.socket.write(Buffer.from([ responseCode ]));
+        // this.socket.write(Buffer.from([ responseCode ]));
+        this.socket.write(Buffer.from([ CONNECTION_ACCEPTED ]));
 
-        return success;
+        // return success;
+        return true;
     }
 
     public decodeMessage(buffer: ByteBuffer): void {
@@ -54,7 +56,7 @@ export class UpdateServerConnection extends SocketServer {
 
             const fileRequest: FileRequest = {
                 archiveIndex, fileIndex,
-                archiveName: this.updateServer.fileStore.getArchive(String(archiveIndex)).name };
+                archiveName: this.updateServer.fileStore.get(archiveIndex).name };
 
             if(requestMethod === 1) {
                 try {

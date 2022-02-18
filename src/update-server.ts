@@ -1,8 +1,7 @@
 import { logger } from '@runejs/common';
 import { ByteBuffer } from '@runejs/common/buffer';
 import { parseServerConfig, SocketServer } from '@runejs/common/net';
-import { Archive, File, Group, IndexedFile, FlatFileStore } from '@runejs/filestore/flat-file-store';
-import { StoreConfig } from '@runejs/filestore/config';
+import { Store, Archive, Group, IndexedFile } from '@runejs/store';
 import { FileRequest } from './net/file-request';
 import { UpdateServerConfig } from './config/update-server-config';
 import { UpdateServerConnection } from './net/update-server-connection';
@@ -11,7 +10,7 @@ import { UpdateServerConnection } from './net/update-server-connection';
 export class UpdateServer {
 
     public readonly serverConfig: UpdateServerConfig;
-    public fileStore: FlatFileStore;
+    public fileStore: Store;
     public mainIndexFile: Buffer;
 
     public constructor() {
@@ -39,14 +38,11 @@ export class UpdateServer {
         try {
             const start = Date.now();
 
-            this.fileStore = new FlatFileStore({
-                storePath: this.serverConfig.storePath,
-                gameVersion: this.serverConfig.gameVersion
-            });
-
             logger.info(`Reading store archives...`);
 
-            StoreConfig.register(this.serverConfig.storePath, this.serverConfig.gameVersion);
+            this.fileStore = await Store.create(this.serverConfig.gameVersion, this.serverConfig.storePath);
+
+            /*StoreConfig.register(this.serverConfig.storePath, this.serverConfig.gameVersion);
             StoreConfig.loadArchiveConfig();
 
             const fileReadStart = Date.now();
@@ -101,7 +97,7 @@ export class UpdateServer {
             const end = Date.now();
             const duration = end - start;
 
-            logger.info(`Archives loaded and compressed in ${duration / 1000} seconds.`);
+            logger.info(`Archives loaded and compressed in ${duration / 1000} seconds.`);*/
         } catch(e) {
             logger.error(e);
         }
@@ -111,12 +107,13 @@ export class UpdateServer {
         const { archiveIndex, fileIndex } = fileRequest;
 
         if(archiveIndex === 255) {
-            return fileIndex === 255 ? this.wrapMainIndexFile() : this.generateArchiveIndexFile(fileIndex);
+            return fileIndex === 255 ? this.fileStore.data.toNodeBuffer() :
+                this.fileStore.get(fileIndex).index.data;
         }
 
-        const archive = archiveIndex === 255 ? null : this.fileStore.getArchive(String(archiveIndex));
+        const archive = archiveIndex === 255 ? null : this.fileStore.get(archiveIndex);
 
-        const file: Group | File = archive.groups.get(String(fileIndex));
+        const file: Group = archive.get(fileIndex);
 
         if(file?.data) {
             return this.createFileResponse(fileRequest, archive, file);
@@ -162,12 +159,7 @@ export class UpdateServer {
     }
 
     protected generateArchiveIndexFile(archiveIndex: number): Buffer {
-        const indexData = this.fileStore.getArchive(String(archiveIndex));
-        return this.createFileResponse({
-            archiveIndex: 255,
-            archiveName: 'main',
-            fileIndex: archiveIndex
-        }, this.fileStore.getArchive('255'), indexData);
+        return this.fileStore.get(archiveIndex).index.data;
     }
 
     protected wrapMainIndexFile(): Buffer {

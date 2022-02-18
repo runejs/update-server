@@ -22,8 +22,8 @@
     "author": "Tynarus",
     "license": "GPL-3.0",
     "dependencies": {
-        "@runejs/common": "2.0.0-rc.9",
-        "@runejs/filestore": "file:../filestore/lib",
+        "@runejs/common": "2.0.0-rc.14",
+        "@runejs/store": "file:../filestore/lib",
         "graceful-fs": "^4.2.8",
         "source-map-support": "^0.5.19",
         "tslib": "^2.3.1"
