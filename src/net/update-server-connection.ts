@@ -24,17 +24,17 @@ export class UpdateServerConnection extends SocketServer {
     public initialHandshake(buffer: ByteBuffer): boolean {
         logger.info(`initialHandshake, readable = ${buffer.readable}`);
         const clientVersion: number = buffer.get('int');
-        const supportedVersion: number = this.updateServer.serverConfig.gameVersion;
-
-        const responseCode: number = clientVersion === supportedVersion ? CONNECTION_ACCEPTED : UNSUPPORTED_CLIENT_VERSION;
-        const success: boolean = responseCode === CONNECTION_ACCEPTED;
+        const supportedVersion = this.updateServer.serverConfig.gameVersion;
 
         // send the handshake response to the client
-        // this.socket.write(Buffer.from([ responseCode ]));
-        this.socket.write(Buffer.from([ CONNECTION_ACCEPTED ]));
-
-        // return success;
-        return true;
+        if(supportedVersion === 'any') {
+            this.socket.write(Buffer.from([ CONNECTION_ACCEPTED ]));
+            return true;
+        } else {
+            const responseCode: number = clientVersion === supportedVersion ? CONNECTION_ACCEPTED : UNSUPPORTED_CLIENT_VERSION;
+            this.socket.write(Buffer.from([ responseCode ]));
+            return responseCode === CONNECTION_ACCEPTED;
+        }
     }
 
     public decodeMessage(buffer: ByteBuffer): void {
@@ -54,16 +54,15 @@ export class UpdateServerConnection extends SocketServer {
                 break;
             }
 
+            const archiveName = archiveIndex === 255 ? 'main' :
+                this.updateServer.fileStore.get(archiveIndex).name
+
             const fileRequest: FileRequest = {
-                archiveIndex, fileIndex,
-                archiveName: this.updateServer.fileStore.get(archiveIndex).name };
+                archiveIndex, fileIndex, archiveName
+            };
 
             if(requestMethod === 1) {
-                try {
-                    this.sendFile(fileRequest);
-                } catch(error) {
-                    logger.error(error);
-                }
+                this.sendFile(fileRequest);
             } else if(requestMethod === 0) {
                 this.fileRequests.push(fileRequest);
             }
@@ -85,11 +84,7 @@ export class UpdateServerConnection extends SocketServer {
         this.fileRequests = [];
 
         for(const fileRequest of fileRequests) {
-            try {
-                this.sendFile(fileRequest);
-            } catch(error) {
-                logger.error(error);
-            }
+            this.sendFile(fileRequest);
         }
     }
 

@@ -5,5 +5,6 @@ export interface UpdateServerConfig extends ServerConfigOptions {
     updateServerHost: string;
     updateServerPort: number;
     storePath: string;
-    gameVersion: number;
+    gameVersion: number | 'any';
+    storeVersion: number;
 }
