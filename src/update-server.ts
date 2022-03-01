@@ -1,6 +1,5 @@
-import { logger } from '@runejs/core';
-import { ByteBuffer } from '@runejs/core/buffer';
-import { parseServerConfig, SocketServer } from '@runejs/core/net';
+import { logger, ByteBuffer } from '@runejs/common';
+import { parseServerConfig, SocketServer } from '@runejs/common/net';
 import { Filestore, readIndexedDataChunk } from '@runejs/filestore';
 import { Socket } from 'net';
 import * as CRC32 from 'crc-32';
@@ -98,8 +97,8 @@ class UpdateServerConnection extends SocketServer {
         buffer.put(index, 'BYTE');
         buffer.put(file, 'SHORT');
 
-        let length: number = ((cacheFile.at(1, 'UNSIGNED') << 24) + (cacheFile.at(2, 'UNSIGNED') << 16) +
-            (cacheFile.at(3, 'UNSIGNED') << 8) + cacheFile.at(4, 'UNSIGNED')) + 9;
+        let length: number = ((cacheFile.at(1, 'byte', 'u') << 24) + (cacheFile.at(2, 'byte', 'u') << 16) +
+            (cacheFile.at(3, 'byte', 'u') << 8) + cacheFile.at(4, 'byte', 'u')) + 9;
         if(cacheFile.at(0) === 0) {
             length -= 4;
         }
