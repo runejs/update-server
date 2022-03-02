@@ -1,17 +1,29 @@
-import { logger } from '@runejs/common';
-import { ByteBuffer } from '@runejs/common/buffer';
+import { logger, ByteBuffer } from '@runejs/common';
 import { parseServerConfig, SocketServer } from '@runejs/common/net';
-import { Store, Archive, Group, IndexedFile, IndexEntity } from '@runejs/store';
-import { FileRequest } from './net/file-request';
-import { UpdateServerConfig } from './config/update-server-config';
-import { UpdateServerConnection } from './net/update-server-connection';
+import { Store } from '@runejs/store';
+
+import { FileRequest, UpdateServerConnection } from './net';
+import { UpdateServerConfig } from './config';
+
+
+interface ServerConfig {
+    updateServerHost: string;
+    updateServerPort: number;
+    cacheDir: string;
+    configDir?: string;
+}
+
+enum ConnectionStage {
+    HANDSHAKE = 'handshake',
+    ACTIVE = 'active'
+}
 
 
 export class UpdateServer {
 
     public readonly serverConfig: UpdateServerConfig;
     public fileStore: Store;
-    public mainIndexFile: ByteBuffer;
+    public mainIndexFile: Buffer;
 
     public constructor() {
         this.serverConfig = parseServerConfig<UpdateServerConfig>();
@@ -40,9 +52,9 @@ export class UpdateServer {
         logger.info(`Reading store archives...`);
 
         this.fileStore = await Store.create(this.serverConfig.storeVersion, this.serverConfig.storePath);
-        this.fileStore.archives.forEach(archive => archive.js5Encode(true));
-        this.fileStore.js5Encode();
-        this.mainIndexFile = this.fileStore.data;
+        // this.fileStore.archives.forEach(archive => archive.js5Encode(true));
+        // this.fileStore.js5Encode();
+        this.mainIndexFile = this.fileStore.index.data;
 
         const end = Date.now();
         const duration = end - start;
@@ -54,12 +66,12 @@ export class UpdateServer {
         const { archiveIndex, fileIndex, archiveName } = fileRequest;
         logger.info(`File Requested: ${archiveName} ${fileIndex}`);
 
-        let fileData: ByteBuffer | null = null;
+        let fileData: ByteBuffer | Buffer | null;
 
         if(archiveIndex === 255) {
-            fileData = fileIndex === 255 ? this.mainIndexFile : this.fileStore.get(fileIndex)?.data || null;
+            fileData = fileIndex === 255 ? this.mainIndexFile : this.fileStore.get(fileIndex)?.index?.data || null;
         } else {
-            fileData = this.fileStore.get(archiveIndex)?.get(fileIndex)?.data || null;
+            fileData = this.fileStore.get(archiveIndex)?.get(fileIndex)?.index?.data || null;
         }
 
         if(!fileData?.length) {
@@ -67,7 +79,7 @@ export class UpdateServer {
             return null;
         }
 
-        return this.createFilePacket(archiveIndex, fileIndex, fileData.toNodeBuffer());
+        return this.createFilePacket(archiveIndex, fileIndex, Buffer.from(fileData));
     }
 
     protected createFilePacket(archiveIndex: number, fileIndex: number, fileData: Buffer): Buffer {
