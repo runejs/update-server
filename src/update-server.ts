@@ -6,19 +6,6 @@ import { FileRequest, UpdateServerConnection } from './net';
 import { UpdateServerConfig } from './config';
 
 
-interface ServerConfig {
-    updateServerHost: string;
-    updateServerPort: number;
-    cacheDir: string;
-    configDir?: string;
-}
-
-enum ConnectionStage {
-    HANDSHAKE = 'handshake',
-    ACTIVE = 'active'
-}
-
-
 export class UpdateServer {
 
     public readonly serverConfig: UpdateServerConfig;
@@ -52,9 +39,8 @@ export class UpdateServer {
         logger.info(`Reading store archives...`);
 
         this.fileStore = await Store.create(this.serverConfig.storeVersion, this.serverConfig.storePath);
-        // this.fileStore.archives.forEach(archive => archive.js5Encode(true));
-        // this.fileStore.js5Encode();
-        this.mainIndexFile = this.fileStore.index.data;
+        await this.fileStore.read(false, false);
+        this.mainIndexFile = Buffer.from(this.fileStore.index.data);
 
         const end = Date.now();
         const duration = end - start;
@@ -64,12 +50,13 @@ export class UpdateServer {
 
     public handleFileRequest(fileRequest: FileRequest): Buffer | null {
         const { archiveIndex, fileIndex, archiveName } = fileRequest;
-        logger.info(`File Requested: ${archiveName} ${fileIndex}`);
+        // logger.debug(`File Requested: ${archiveName} ${fileIndex}`);
 
         let fileData: ByteBuffer | Buffer | null;
 
         if(archiveIndex === 255) {
-            fileData = fileIndex === 255 ? this.mainIndexFile : this.fileStore.get(fileIndex)?.index?.data || null;
+            fileData = fileIndex === 255 ? this.mainIndexFile :
+                this.fileStore.get(fileIndex)?.index?.data || null;
         } else {
             fileData = this.fileStore.get(archiveIndex)?.get(fileIndex)?.index?.data || null;
         }
@@ -110,20 +97,6 @@ export class UpdateServer {
         }
 
         return packet.flipWriter().toNodeBuffer();
-    }
-
-    protected generateArchiveIndexFile(archiveIndex: number): Buffer {
-        return this.fileStore.get(archiveIndex).index.data;
-    }
-
-    protected wrapMainIndexFile(): Buffer {
-        const crcTableCopy = new ByteBuffer(this.mainIndexFile.length);
-        this.mainIndexFile.copy(crcTableCopy, 0, 0);
-        const crcFileBuffer = new ByteBuffer(86);
-        crcFileBuffer.put(255);
-        crcFileBuffer.put(255, 'short');
-        crcFileBuffer.putBytes(crcTableCopy, 0, 83);
-        return Buffer.from(crcFileBuffer);
     }
 
 }
