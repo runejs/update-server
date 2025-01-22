@@ -40,7 +40,7 @@ export class UpdateServer {
 
             logger.info(`Reading store archives...`);
 
-            this.fileStore = await Store.create(this.serverConfig.gameVersion, this.serverConfig.storePath);
+            this.fileStore = await Store.create(this.serverConfig.gameVersion + '', this.serverConfig.storePath);
 
             /*StoreConfig.register(this.serverConfig.storePath, this.serverConfig.gameVersion);
             StoreConfig.loadArchiveConfig();
