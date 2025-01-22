@@ -1,9 +1,9 @@
-import { Socket } from 'net';
+import type { Socket } from 'node:net';
 import { logger } from '@runejs/common';
 import { SocketServer } from '@runejs/common/net';
-import { ByteBuffer } from '@runejs/common/buffer';
-import { UpdateServer } from '../update-server';
-import { FileRequest } from './file-request';
+import type { ByteBuffer } from '@runejs/common/buffer';
+import type { UpdateServer } from '../update-server';
+import type { FileRequest } from './file-request';
 
 
 export const CONNECTION_ACCEPTED = 0;

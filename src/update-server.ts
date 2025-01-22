@@ -1,9 +1,9 @@
 import { logger } from '@runejs/common';
 import { ByteBuffer } from '@runejs/common/buffer';
 import { parseServerConfig, SocketServer } from '@runejs/common/net';
-import { Store, Archive, Group, IndexedFile } from '@runejs/store';
-import { FileRequest } from './net/file-request';
-import { UpdateServerConfig } from './config/update-server-config';
+import { type IndexEntity, Store, type Archive, type Group, type IndexedFile } from '@runejs/store';
+import type { FileRequest } from './net/file-request';
+import type { UpdateServerConfig } from './config/update-server-config';
 import { UpdateServerConnection } from './net/update-server-connection';
 
 
@@ -17,8 +17,8 @@ export class UpdateServer {
         this.serverConfig = parseServerConfig<UpdateServerConfig>();
 
         if(!this.serverConfig.gameVersion) {
-            throw new Error(`Update Server supported client version was not provided. ` +
-                `Please add clientVersion to your configuration file.`);
+            throw new Error('Update Server supported client version was not provided. ' +
+                'Please add clientVersion to your configuration file.');
         }
     }
 
@@ -38,9 +38,9 @@ export class UpdateServer {
         try {
             const start = Date.now();
 
-            logger.info(`Reading store archives...`);
+            logger.info('Reading store archives...');
 
-            this.fileStore = await Store.create(this.serverConfig.gameVersion + '', this.serverConfig.storePath);
+            this.fileStore = await Store.create(`${this.serverConfig.gameVersion}`, this.serverConfig.storePath);
 
             /*StoreConfig.register(this.serverConfig.storePath, this.serverConfig.gameVersion);
             StoreConfig.loadArchiveConfig();
@@ -118,15 +118,14 @@ export class UpdateServer {
         if(file?.data) {
             return this.createFileResponse(fileRequest, archive, file);
             // return file.wrap(); // @TODO lol still broken
-        } else {
+        }
             logger.error(`File ${fileIndex} in archive ${archive.name} is empty.`);
             return null;
-        }
     }
 
     protected createFileResponse(fileRequest: FileRequest,
                                  archive: Archive,
-                                 file: IndexedFile<any>): Buffer | null {
+                                 file: IndexedFile<IndexEntity>): Buffer | null {
         if((file?.data?.length ?? 0) < 5) {
             logger.error(`File ${fileRequest.fileIndex} in archive ${archive.name} is corrupt.`);
             return null;

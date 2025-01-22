@@ -1,4 +1,4 @@
-import { ServerConfigOptions } from '@runejs/common/net';
+import type { ServerConfigOptions } from '@runejs/common/net';
 
 
 export interface UpdateServerConfig extends ServerConfigOptions {
