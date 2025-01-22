@@ -1,14 +1,18 @@
 import { logger } from '@runejs/common';
 import { ByteBuffer } from '@runejs/common/buffer';
 import { parseServerConfig, SocketServer } from '@runejs/common/net';
-import { type IndexEntity, Store, type Archive, type Group, type IndexedFile } from '@runejs/store';
+import {
+    type IndexEntity,
+    Store,
+    type Archive,
+    type Group,
+    type IndexedFile,
+} from '@runejs/store';
 import type { FileRequest } from './net/file-request';
 import type { UpdateServerConfig } from './config/update-server-config';
 import { UpdateServerConnection } from './net/update-server-connection';
 
-
 export class UpdateServer {
-
     public readonly serverConfig: UpdateServerConfig;
     public fileStore: Store;
     public mainIndexFile: Buffer;
@@ -16,9 +20,11 @@ export class UpdateServer {
     public constructor() {
         this.serverConfig = parseServerConfig<UpdateServerConfig>();
 
-        if(!this.serverConfig.gameVersion) {
-            throw new Error('Update Server supported client version was not provided. ' +
-                'Please add clientVersion to your configuration file.');
+        if (!this.serverConfig.gameVersion) {
+            throw new Error(
+                'Update Server supported client version was not provided. ' +
+                    'Please add clientVersion to your configuration file.',
+            );
         }
     }
 
@@ -27,9 +33,12 @@ export class UpdateServer {
 
         await updateServer.loadFileStore();
 
-        SocketServer.launch<UpdateServerConnection>('Update Server',
-            updateServer.serverConfig.updateServerHost, updateServer.serverConfig.updateServerPort,
-            socket => new UpdateServerConnection(updateServer, socket));
+        SocketServer.launch<UpdateServerConnection>(
+            'Update Server',
+            updateServer.serverConfig.updateServerHost,
+            updateServer.serverConfig.updateServerPort,
+            (socket) => new UpdateServerConnection(updateServer, socket),
+        );
 
         return updateServer;
     }
@@ -40,7 +49,10 @@ export class UpdateServer {
 
             logger.info('Reading store archives...');
 
-            this.fileStore = await Store.create(`${this.serverConfig.gameVersion}`, this.serverConfig.storePath);
+            this.fileStore = await Store.create(
+                `${this.serverConfig.gameVersion}`,
+                this.serverConfig.storePath,
+            );
 
             /*StoreConfig.register(this.serverConfig.storePath, this.serverConfig.gameVersion);
             StoreConfig.loadArchiveConfig();
@@ -98,7 +110,7 @@ export class UpdateServer {
             const duration = end - start;
 
             logger.info(`Archives loaded and compressed in ${duration / 1000} seconds.`);*/
-        } catch(e) {
+        } catch (e) {
             logger.error(e);
         }
     }
@@ -106,28 +118,34 @@ export class UpdateServer {
     public handleFileRequest(fileRequest: FileRequest): Buffer | null {
         const { archiveIndex, fileIndex } = fileRequest;
 
-        if(archiveIndex === 255) {
-            return fileIndex === 255 ? this.fileStore.data.toNodeBuffer() :
-                this.fileStore.get(fileIndex).index.data;
+        if (archiveIndex === 255) {
+            return fileIndex === 255
+                ? this.fileStore.data.toNodeBuffer()
+                : this.fileStore.get(fileIndex).index.data;
         }
 
-        const archive = archiveIndex === 255 ? null : this.fileStore.get(archiveIndex);
+        const archive =
+            archiveIndex === 255 ? null : this.fileStore.get(archiveIndex);
 
         const file: Group = archive.get(fileIndex);
 
-        if(file?.data) {
+        if (file?.data) {
             return this.createFileResponse(fileRequest, archive, file);
             // return file.wrap(); // @TODO lol still broken
         }
-            logger.error(`File ${fileIndex} in archive ${archive.name} is empty.`);
-            return null;
+        logger.error(`File ${fileIndex} in archive ${archive.name} is empty.`);
+        return null;
     }
 
-    protected createFileResponse(fileRequest: FileRequest,
-                                 archive: Archive,
-                                 file: IndexedFile<IndexEntity>): Buffer | null {
-        if((file?.data?.length ?? 0) < 5) {
-            logger.error(`File ${fileRequest.fileIndex} in archive ${archive.name} is corrupt.`);
+    protected createFileResponse(
+        fileRequest: FileRequest,
+        archive: Archive,
+        file: IndexedFile<IndexEntity>,
+    ): Buffer | null {
+        if ((file?.data?.length ?? 0) < 5) {
+            logger.error(
+                `File ${fileRequest.fileIndex} in archive ${archive.name} is corrupt.`,
+            );
             return null;
         }
 
@@ -136,16 +154,19 @@ export class UpdateServer {
         file.data.readerIndex = 0;
 
         const fileCompression: number = file.data.get('byte');
-        const fileSize: number = file.data.get('int', 'unsigned') + (fileCompression === 0 ? 5 : 9);
+        const fileSize: number =
+            file.data.get('int', 'unsigned') + (fileCompression === 0 ? 5 : 9);
 
-        const responsePacket = new ByteBuffer((fileSize - 2) + ((fileSize - 2) / 511) + 8);
+        const responsePacket = new ByteBuffer(
+            fileSize - 2 + (fileSize - 2) / 511 + 8,
+        );
 
         responsePacket.put(archiveIndex);
         responsePacket.put(fileIndex, 'short');
 
         let s = 3;
-        for(let i = 0; i < fileSize; i++) {
-            if(s === 512) {
+        for (let i = 0; i < fileSize; i++) {
+            if (s === 512) {
                 responsePacket.put(255);
                 s = 1;
             }
@@ -170,5 +191,4 @@ export class UpdateServer {
         crcFileBuffer.putBytes(crcTableCopy, 0, 83);
         return Buffer.from(crcFileBuffer);
     }
-
 }
