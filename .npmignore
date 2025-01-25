@@ -6,6 +6,8 @@ tsconfig.json
 nodemon.json
 tslint.json
 /config/server-config.json
+/config/file-names.properties
 /data/config
 server-config.yaml
 server-config.json
+biome.json
