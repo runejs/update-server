@@ -7,6 +7,7 @@ node_modules
 /cache
 server-config.yaml
 server-config.json
+/config/file-names.properties
 
 
 # local env files
